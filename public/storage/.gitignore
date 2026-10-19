@@ -1,0 +1,5 @@
+# Allow files and folders in public/storage
+*.log
+mpdf-temp*
+!.gitignore
+!.gitkeep

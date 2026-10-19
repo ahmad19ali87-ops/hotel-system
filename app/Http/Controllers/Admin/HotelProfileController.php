@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\Hotel;
+use App\Support\StorageFolderManager;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
@@ -90,6 +91,9 @@ class HotelProfileController extends Controller
             $hotel->phone = $filteredPhones[0] ?? null;
             $hotel->phones = !empty($filteredPhones) ? json_encode($filteredPhones) : null;
         }
+
+        // التأكد من وجود مجلدات الفندق في التخزين العام
+        StorageFolderManager::ensureHotelDirectories($hotel->slug);
 
         // إزالة الشعار
         if ($request->boolean('remove_logo')) {

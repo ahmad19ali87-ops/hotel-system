@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Invoice;
+use App\Support\StorageFolderManager;
 use Mpdf\Mpdf;
 use Mpdf\Output\Destination;
 use Illuminate\Support\Facades\Storage;
@@ -42,6 +43,8 @@ class InvoicePdfService
         $mpdf->WriteHTML($html);
 
         $hotelDirectory = Str::slug($invoice->hotel->slug ?: $invoice->hotel->name);
+        StorageFolderManager::ensureHotelDirectories($hotelDirectory);
+
         $path = $hotelDirectory . '/invoices/' . $invoice->id . '.pdf';
         Storage::disk('public')->put($path, $mpdf->Output('', Destination::STRING_RETURN));
 

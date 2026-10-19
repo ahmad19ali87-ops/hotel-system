@@ -5,8 +5,10 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Controller;
 use App\Models\Hotel;
 use App\Models\User;
+use App\Support\StorageFolderManager;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 
@@ -72,6 +74,9 @@ class HotelController extends Controller
             $amenitiesList = array_merge($amenitiesList, $customs);
         }
         $encodedAmenities = !empty($amenitiesList) ? json_encode(array_values(array_unique($amenitiesList)), JSON_UNESCAPED_UNICODE) : null;
+
+        // Ensure hotel directories and upload folders exist in public storage
+        StorageFolderManager::ensureHotelDirectories($slug);
 
         $logoPath = null;
         if ($request->hasFile('logo')) {
@@ -233,6 +238,9 @@ class HotelController extends Controller
             $hotel->phone = $filteredPhones[0] ?? null;
             $hotel->phones = !empty($filteredPhones) ? json_encode($filteredPhones) : null;
         }
+
+        // التأكد من وجود مجلدات الفندق في التخزين العام
+        StorageFolderManager::ensureHotelDirectories($hotel->slug);
 
         // إزالة الشعار إذا طلب المستخدم
         if ($request->boolean('remove_logo')) {

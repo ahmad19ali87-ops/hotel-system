@@ -9,6 +9,7 @@ use App\Models\Room;
 use App\Models\RoomType;
 use App\Models\SiteSetting;
 use App\Models\User;
+use App\Support\StorageFolderManager;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\Hash;
 
@@ -19,6 +20,8 @@ class DatabaseSeeder extends Seeder
      */
     public function run(): void
     {
+        StorageFolderManager::ensureCoreDirectories();
+
         // 1. Super Admin
         $superAdmin = User::firstOrCreate(
             ['email' => 'ahmad19ali87@gmail.com'],
@@ -107,6 +110,11 @@ class DatabaseSeeder extends Seeder
                 'status' => 'active',
             ]
         );
+
+        // Ensure directories for seeded hotels exist
+        foreach ([$hotel1, $hotel2, $hotel3, $hotel4] as $h) {
+            StorageFolderManager::ensureHotelDirectories($h->slug);
+        }
 
         // 3. Hotel Admins
         User::firstOrCreate(
