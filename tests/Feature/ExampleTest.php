@@ -33,6 +33,7 @@ class ExampleTest extends TestCase
             $table->string('address')->nullable();
             $table->string('province')->nullable();
             $table->text('phones')->nullable();
+            $table->text('google_maps_url')->nullable();
             $table->string('email')->nullable();
             $table->text('description')->nullable();
             $table->text('images')->nullable();

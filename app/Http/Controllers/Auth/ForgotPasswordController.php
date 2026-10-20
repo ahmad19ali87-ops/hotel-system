@@ -158,3 +158,4 @@ class ForgotPasswordController extends Controller
         return redirect()->route('home')->with('success', 'تهانينا! تم تعيين كلمة المرور الجديدة وتفعيل حسابك بنجاح.');
     }
 }
+

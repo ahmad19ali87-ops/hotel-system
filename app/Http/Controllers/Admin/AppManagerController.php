@@ -8,6 +8,7 @@ use App\Models\AppBroadcast;
 use App\Models\Destination;
 use App\Models\Hotel;
 use App\Models\Message;
+use App\Models\SiteSetting;
 use App\Models\User;
 use App\Services\NotificationService;
 use Illuminate\Http\Request;
@@ -36,6 +37,10 @@ class AppManagerController extends Controller
         $guestsCount = User::where('role', 'guest')->count();
         $totalUsersCount = User::count();
 
+        $welcomeEnabled = SiteSetting::get('app_welcome_enabled', '1') !== '0';
+        $welcomeTitle = SiteSetting::get('app_welcome_title', 'أهلاً بك في بوابة حجز الفنادق الذكية 🎉');
+        $welcomeMessage = SiteSetting::get('app_welcome_message', 'يسعدنا انضمامك إلينا! استمتع بأفضل العروض الحصرية وإقامة مميزة في أرقى الفنادق.');
+
         return view('admin.app-manager.index', compact(
             'destinations',
             'banners',
@@ -44,7 +49,10 @@ class AppManagerController extends Controller
             'broadcastMessages',
             'broadcastNotifications',
             'guestsCount',
-            'totalUsersCount'
+            'totalUsersCount',
+            'welcomeEnabled',
+            'welcomeTitle',
+            'welcomeMessage'
         ));
     }
 
@@ -426,6 +434,25 @@ class AppManagerController extends Controller
 
         return redirect()->route('admin.app-manager.index', ['tab' => $targetTab])
             ->with('status', 'تم حذف سجل البث بنجاح.');
+    }
+
+    /**
+     * Update the first-login/registration welcome notification settings.
+     */
+    public function updateWelcomeNotification(Request $request)
+    {
+        $validated = $request->validate([
+            'app_welcome_enabled' => ['nullable'],
+            'app_welcome_title' => ['required', 'string', 'max:255'],
+            'app_welcome_message' => ['required', 'string', 'max:1000'],
+        ]);
+
+        SiteSetting::set('app_welcome_enabled', $request->has('app_welcome_enabled') ? '1' : '0', 'mobile_app');
+        SiteSetting::set('app_welcome_title', $validated['app_welcome_title'], 'mobile_app');
+        SiteSetting::set('app_welcome_message', $validated['app_welcome_message'], 'mobile_app');
+
+        return redirect()->route('admin.app-manager.index', ['tab' => 'welcome-notification'])
+            ->with('status', 'تم حفظ وتحديث إعدادات إشعار ورسالة الترحيب بنجاح.');
     }
 }
 

@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -17,6 +18,7 @@ void main() async {
 class MobileNotificationService {
   static final FlutterLocalNotificationsPlugin _notificationsPlugin = FlutterLocalNotificationsPlugin();
   static final Set<int> _knownNotifIds = {};
+  static final Set<int> _knownMsgIds = {};
   static Timer? _pollingTimer;
 
   static Future<void> init() async {
@@ -40,7 +42,7 @@ class MobileNotificationService {
 
   static void _startBackgroundPolling() {
     _pollingTimer?.cancel();
-    _pollingTimer = Timer.periodic(const Duration(seconds: 25), (timer) async {
+    _pollingTimer = Timer.periodic(const Duration(seconds: 15), (timer) async {
       if (MobileState.isLoggedIn) {
         await checkNewNotifications();
       }
@@ -49,6 +51,8 @@ class MobileNotificationService {
 
   static Future<void> checkNewNotifications() async {
     if (!MobileState.isLoggedIn) return;
+
+    // 1. Fetch system & broadcast notifications
     try {
       final res = await http.get(
         Uri.parse('${MobileState.apiUrl}/notifications?unread_only=1'),
@@ -60,6 +64,7 @@ class MobileNotificationService {
       if (res.statusCode == 200) {
         final body = jsonDecode(res.body);
         final List<dynamic> notifs = body['data'] ?? [];
+        MobileState.unreadNotificationsNotifier.value = notifs.length;
         for (final n in notifs) {
           final id = (n['id'] is num) ? (n['id'] as num).toInt() : 1;
           if (!_knownNotifIds.contains(id)) {
@@ -71,6 +76,38 @@ class MobileNotificationService {
             );
           }
         }
+      }
+    } catch (_) {}
+
+    // 2. Fetch direct messages & conversations from hotels
+    try {
+      final res = await http.get(
+        Uri.parse('${MobileState.apiUrl}/chat/conversations'),
+        headers: {
+          'Authorization': 'Bearer ${MobileState.token}',
+          'Accept': 'application/json',
+        },
+      );
+      if (res.statusCode == 200) {
+        final body = jsonDecode(res.body);
+        final List<dynamic> convs = body['data'] ?? [];
+        int totalUnread = 0;
+        for (final c in convs) {
+          final unread = (c['unread_count'] is num) ? (c['unread_count'] as num).toInt() : 0;
+          totalUnread += unread;
+          final lastId = (c['last_message_id'] is num)
+              ? (c['last_message_id'] as num).toInt()
+              : (c['id'] is num ? (c['id'] as num).toInt() : 0);
+          if (unread > 0 && lastId > 0 && !_knownMsgIds.contains(lastId)) {
+            _knownMsgIds.add(lastId);
+            await showNotification(
+              id: 700000 + lastId,
+              title: 'رسالة جديدة من ${c['name']} 💬',
+              body: c['last_message'] ?? 'أرسل لك رسالة جديدة',
+            );
+          }
+        }
+        MobileState.unreadMessagesNotifier.value = totalUnread;
       }
     } catch (_) {}
   }
@@ -142,6 +179,9 @@ class MobileState {
   static String? token;
   static Map<String, dynamic>? currentUser;
 
+  static final ValueNotifier<int> unreadMessagesNotifier = ValueNotifier<int>(0);
+  static final ValueNotifier<int> unreadNotificationsNotifier = ValueNotifier<int>(0);
+
   static bool get isLoggedIn => token != null && currentUser != null;
 
   static Future<void> loadSession() async {
@@ -157,6 +197,33 @@ class MobileState {
       final userStr = prefs.getString('auth_user');
       if (userStr != null) {
         currentUser = jsonDecode(userStr);
+      }
+    } catch (_) {}
+  }
+
+  static Future<void> refreshProfile() async {
+    if (token == null) return;
+    try {
+      final res = await http.get(
+        Uri.parse('$apiUrl/profile'),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Accept': 'application/json',
+        },
+      );
+      if (res.statusCode == 200) {
+        final body = jsonDecode(res.body);
+        if (body['user'] != null) {
+          currentUser = body['user'];
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setString('auth_user', jsonEncode(currentUser));
+          if (body['user']['unread_messages'] is num) {
+            unreadMessagesNotifier.value = (body['user']['unread_messages'] as num).toInt();
+          }
+          if (body['user']['unread_notifications'] is num) {
+            unreadNotificationsNotifier.value = (body['user']['unread_notifications'] as num).toInt();
+          }
+        }
       }
     } catch (_) {}
   }
@@ -182,6 +249,8 @@ class MobileState {
   static Future<void> clearSession() async {
     token = null;
     currentUser = null;
+    unreadMessagesNotifier.value = 0;
+    unreadNotificationsNotifier.value = 0;
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove('auth_token');
@@ -200,7 +269,20 @@ class MobileMainScreen extends StatefulWidget {
 class _MobileMainScreenState extends State<MobileMainScreen> {
   int _currentNavIndex = 0;
 
+  @override
+  void initState() {
+    super.initState();
+    if (MobileState.isLoggedIn) {
+      MobileState.refreshProfile();
+      MobileNotificationService.checkNewNotifications();
+    }
+  }
+
   void _onLoginChanged() {
+    if (MobileState.isLoggedIn) {
+      MobileState.refreshProfile();
+      MobileNotificationService.checkNewNotifications();
+    }
     setState(() {});
   }
 
@@ -227,12 +309,29 @@ class _MobileMainScreenState extends State<MobileMainScreen> {
         backgroundColor: Colors.white,
         elevation: 8,
         indicatorColor: const Color(0xFFE6EFFD),
-        destinations: const [
-          NavigationDestination(icon: Icon(Icons.search), label: 'استكشاف'),
-          NavigationDestination(icon: Icon(Icons.local_offer_outlined), label: 'العروض'),
-          NavigationDestination(icon: Icon(Icons.calendar_month_outlined), label: 'حجوزاتي'),
-          NavigationDestination(icon: Icon(Icons.chat_bubble_outline), label: 'الرسائل'),
-          NavigationDestination(icon: Icon(Icons.person_outline), label: 'حسابي'),
+        destinations: [
+          const NavigationDestination(icon: Icon(Icons.search), label: 'استكشاف'),
+          const NavigationDestination(icon: Icon(Icons.local_offer_outlined), label: 'العروض'),
+          const NavigationDestination(icon: Icon(Icons.calendar_month_outlined), label: 'حجوزاتي'),
+          ValueListenableBuilder<int>(
+            valueListenable: MobileState.unreadMessagesNotifier,
+            builder: (ctx, unreadCount, _) => NavigationDestination(
+              icon: Badge.count(
+                count: unreadCount,
+                isLabelVisible: unreadCount > 0,
+                backgroundColor: Colors.redAccent,
+                child: const Icon(Icons.chat_bubble_outline),
+              ),
+              selectedIcon: Badge.count(
+                count: unreadCount,
+                isLabelVisible: unreadCount > 0,
+                backgroundColor: Colors.redAccent,
+                child: const Icon(Icons.chat_bubble),
+              ),
+              label: 'الرسائل',
+            ),
+          ),
+          const NavigationDestination(icon: Icon(Icons.person_outline), label: 'حسابي'),
         ],
       ),
     );
@@ -908,15 +1007,21 @@ class _ExploreScreenState extends State<ExploreScreen> {
                     onPressed: _openComplaintsSheet,
                   ),
                   // Notifications Button (زر الإشعارات)
-                  Badge.count(
-                    count: _unreadCount,
-                    isLabelVisible: _unreadCount > 0,
-                    backgroundColor: Colors.redAccent,
-                    child: IconButton(
-                      icon: const Icon(Icons.notifications_outlined, color: Colors.white),
-                      tooltip: 'الإشعارات والتنبيهات',
-                      onPressed: _openNotificationsSheet,
-                    ),
+                  ValueListenableBuilder<int>(
+                    valueListenable: MobileState.unreadNotificationsNotifier,
+                    builder: (ctx, notifCount, _) {
+                      final effectiveCount = notifCount > 0 ? notifCount : _unreadCount;
+                      return Badge.count(
+                        count: effectiveCount,
+                        isLabelVisible: effectiveCount > 0,
+                        backgroundColor: Colors.redAccent,
+                        child: IconButton(
+                          icon: const Icon(Icons.notifications_outlined, color: Colors.white),
+                          tooltip: 'الإشعارات والتنبيهات',
+                          onPressed: _openNotificationsSheet,
+                        ),
+                      );
+                    },
                   ),
                   IconButton(
                     onPressed: _openSettingsMenu,
@@ -2130,11 +2235,63 @@ class _HotelDetailScreenState extends State<HotelDetailScreen> {
                     ),
                   ),
 
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text('الغرف والخيارات المتاحة:', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                      if (_checkInDate != null)
+                  if (_checkInDate == null) ...[
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(vertical: 36, horizontal: 20),
+                      margin: const EdgeInsets.symmetric(vertical: 12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFEFF6FF),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: const Color(0xFFBFDBFE), width: 1.5),
+                        boxShadow: [
+                          BoxShadow(color: const Color(0xFF003580).withValues(alpha: 0.05), blurRadius: 10, offset: const Offset(0, 4)),
+                        ],
+                      ),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(14),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF003580).withValues(alpha: 0.1),
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Icon(Icons.date_range, size: 48, color: Color(0xFF003580)),
+                          ),
+                          const SizedBox(height: 16),
+                          const Text(
+                            'الرجاء اختيار تاريخ وصولك لمعرفة الغرف المتاحة',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF1E3A8A)),
+                          ),
+                          const SizedBox(height: 8),
+                          const Text(
+                            'حدد موعد الوصول والمغادرة لعرض كافة الغرف الشاغرة والأسعار الدقيقة لإقامتك.',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(fontSize: 12, color: Color(0xFF475569)),
+                          ),
+                          const SizedBox(height: 20),
+                          ElevatedButton.icon(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF003580),
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                              elevation: 2,
+                            ),
+                            onPressed: _pickDates,
+                            icon: const Icon(Icons.calendar_month, size: 18),
+                            label: const Text('اختيار تاريخ الوصول والإقامة 📅', style: TextStyle(fontWeight: FontWeight.bold)),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ] else ...[
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text('الغرف والخيارات المتاحة:', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                           decoration: BoxDecoration(
@@ -2147,106 +2304,107 @@ class _HotelDetailScreenState extends State<HotelDetailScreen> {
                             style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.green),
                           ),
                         ),
-                    ],
-                  ),
-                  const SizedBox(height: 10),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
 
-                  if (rooms.isEmpty)
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(20),
-                      margin: const EdgeInsets.symmetric(vertical: 8),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFFEF2F2),
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: const Color(0xFFFECACA)),
-                      ),
-                      child: Column(
-                        children: [
-                          const Icon(Icons.event_busy, size: 44, color: Color(0xFFDC2626)),
-                          const SizedBox(height: 8),
-                          const Text(
-                            'لا توجد غرف متاحة للحجز في هذه الفترة',
-                            style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF991B1B)),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            _checkInDate != null && _checkOutDate != null
-                                ? 'جميع غرف هذا الفندق محجوزة بين ${_formatDateArabic(_checkInDate!)} و ${_formatDateArabic(_checkOutDate!)}. يرجى تجربة مواعيد أخرى.'
-                                : 'لا توجد غرف شاغرة حالياً في هذا الفندق.',
-                            textAlign: TextAlign.center,
-                            style: const TextStyle(fontSize: 12, color: Color(0xFF7F1D1D)),
-                          ),
-                          const SizedBox(height: 12),
-                          ElevatedButton.icon(
-                            onPressed: _pickDates,
-                            icon: const Icon(Icons.calendar_month, size: 16),
-                            label: const Text('اختيار تواريخ بديلة'),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFFDC2626),
-                              foregroundColor: Colors.white,
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                            ),
-                          ),
-                        ],
-                      ),
-                    )
-                  else
-                    ...rooms.map((r) {
-                      return Container(
-                        margin: const EdgeInsets.only(bottom: 12),
-                        padding: const EdgeInsets.all(14),
+                    if (rooms.isEmpty)
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(20),
+                        margin: const EdgeInsets.symmetric(vertical: 8),
                         decoration: BoxDecoration(
-                          color: Colors.white,
+                          color: const Color(0xFFFEF2F2),
                           borderRadius: BorderRadius.circular(14),
-                          border: Border.all(color: const Color(0xFFE2E8F0)),
+                          border: Border.all(color: const Color(0xFFFECACA)),
                         ),
-                        child: Row(
+                        child: Column(
                           children: [
-                            Container(
-                              width: 60,
-                              height: 60,
-                              decoration: BoxDecoration(color: const Color(0xFFEFF6FF), borderRadius: BorderRadius.circular(12)),
-                              child: const Center(child: Text('🚪', style: TextStyle(fontSize: 24))),
+                            const Icon(Icons.event_busy, size: 44, color: Color(0xFFDC2626)),
+                            const SizedBox(height: 8),
+                            const Text(
+                              'لا توجد غرف متاحة للحجز في هذه الفترة',
+                              style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF991B1B)),
                             ),
-                            const SizedBox(width: 14),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Row(
-                                    children: [
-                                      Text('غرفة ${r['room_number']}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-                                      const SizedBox(width: 8),
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                        decoration: BoxDecoration(
-                                          color: Colors.green.withValues(alpha: 0.1),
-                                          borderRadius: BorderRadius.circular(4),
-                                        ),
-                                        child: const Text('متاحة للحجز ✓', style: TextStyle(color: Colors.green, fontSize: 10, fontWeight: FontWeight.bold)),
-                                      ),
-                                    ],
-                                  ),
-                                  const SizedBox(height: 2),
-                                  Text(r['room_type'] ?? 'قياسية', style: const TextStyle(color: Colors.grey, fontSize: 12)),
-                                  Text('\$${r['price_usd']} / ${r['price_syp']} ل.س', style: const TextStyle(color: Color(0xFF003580), fontWeight: FontWeight.bold, fontSize: 13)),
-                                ],
-                              ),
+                            const SizedBox(height: 4),
+                            Text(
+                              _checkInDate != null && _checkOutDate != null
+                                  ? 'جميع غرف هذا الفندق محجوزة بين ${_formatDateArabic(_checkInDate!)} و ${_formatDateArabic(_checkOutDate!)}. يرجى تجربة مواعيد أخرى.'
+                                  : 'لا توجد غرف شاغرة حالياً في هذا الفندق.',
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(fontSize: 12, color: Color(0xFF7F1D1D)),
                             ),
-                            ElevatedButton(
+                            const SizedBox(height: 12),
+                            ElevatedButton.icon(
+                              onPressed: _pickDates,
+                              icon: const Icon(Icons.calendar_month, size: 16),
+                              label: const Text('اختيار تواريخ بديلة'),
                               style: ElevatedButton.styleFrom(
-                                backgroundColor: const Color(0xFF003580),
+                                backgroundColor: const Color(0xFFDC2626),
                                 foregroundColor: Colors.white,
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                               ),
-                              onPressed: () => _bookRoom(r),
-                              child: const Text('احجز'),
                             ),
                           ],
                         ),
-                      );
-                    }),
+                      )
+                    else
+                      ...rooms.map((r) {
+                        return Container(
+                          margin: const EdgeInsets.only(bottom: 12),
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(color: const Color(0xFFE2E8F0)),
+                          ),
+                          child: Row(
+                            children: [
+                              Container(
+                                width: 60,
+                                height: 60,
+                                decoration: BoxDecoration(color: const Color(0xFFEFF6FF), borderRadius: BorderRadius.circular(12)),
+                                child: const Center(child: Text('🚪', style: TextStyle(fontSize: 24))),
+                              ),
+                              const SizedBox(width: 14),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Text('غرفة ${r['room_number']}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                                        const SizedBox(width: 8),
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                          decoration: BoxDecoration(
+                                            color: Colors.green.withValues(alpha: 0.1),
+                                            borderRadius: BorderRadius.circular(4),
+                                          ),
+                                          child: const Text('متاحة للحجز ✓', style: TextStyle(color: Colors.green, fontSize: 10, fontWeight: FontWeight.bold)),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(r['room_type'] ?? 'قياسية', style: const TextStyle(color: Colors.grey, fontSize: 12)),
+                                    Text('\$${r['price_usd']} / ${r['price_syp']} ل.س', style: const TextStyle(color: Color(0xFF003580), fontWeight: FontWeight.bold, fontSize: 13)),
+                                  ],
+                                ),
+                              ),
+                              ElevatedButton(
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: const Color(0xFF003580),
+                                  foregroundColor: Colors.white,
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                ),
+                                onPressed: () => _bookRoom(r),
+                                child: const Text('احجز'),
+                              ),
+                            ],
+                          ),
+                        );
+                      }),
+                  ],
                   const SizedBox(height: 20),
                   const Divider(height: 1),
                   const SizedBox(height: 16),
@@ -4217,8 +4375,7 @@ class _ConversationChatScreenState extends State<ConversationChatScreen> {
   Timer? _pollTimer;
 
   bool get _isReplyForbidden {
-    if (widget.contact['allow_reply'] == false) return true;
-    if (_messages.isNotEmpty && _messages.any((m) => m['allow_reply'] == false)) {
+    if (widget.contact['is_broadcast'] == true && widget.contact['allow_reply'] == false) {
       return true;
     }
     return false;
@@ -4392,6 +4549,78 @@ class _ConversationChatScreenState extends State<ConversationChatScreen> {
                                       height: 1.35,
                                     ),
                                   ),
+                                  if (m['attachment_url'] != null && m['attachment_url'].toString().isNotEmpty) ...[
+                                    const SizedBox(height: 8),
+                                    if (m['is_image'] == true) ...[
+                                      ClipRRect(
+                                        borderRadius: BorderRadius.circular(10),
+                                        child: InkWell(
+                                          onTap: () async {
+                                            final uri = Uri.parse(m['attachment_url']);
+                                            if (await canLaunchUrl(uri)) {
+                                              await launchUrl(uri, mode: LaunchMode.externalApplication);
+                                            }
+                                          },
+                                          child: Image.network(
+                                            m['attachment_url'],
+                                            height: 160,
+                                            width: double.infinity,
+                                            fit: BoxFit.cover,
+                                            errorBuilder: (ctx, err, stack) => Container(
+                                              padding: const EdgeInsets.all(10),
+                                              color: Colors.grey.shade200,
+                                              child: const Row(
+                                                children: [
+                                                  Icon(Icons.broken_image, size: 18),
+                                                  SizedBox(width: 6),
+                                                  Text('صورة مرفقة (اضغط للعرض)', style: TextStyle(fontSize: 11)),
+                                                ],
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ] else ...[
+                                      InkWell(
+                                        borderRadius: BorderRadius.circular(8),
+                                        onTap: () async {
+                                          final uri = Uri.parse(m['attachment_url']);
+                                          if (await canLaunchUrl(uri)) {
+                                            await launchUrl(uri, mode: LaunchMode.externalApplication);
+                                          }
+                                        },
+                                        child: Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                                          decoration: BoxDecoration(
+                                            color: isMe ? Colors.white.withValues(alpha: 0.15) : const Color(0xFFF1F5F9),
+                                            borderRadius: BorderRadius.circular(8),
+                                            border: Border.all(color: isMe ? Colors.white24 : Colors.grey.shade300),
+                                          ),
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Icon(Icons.attachment, size: 18, color: isMe ? Colors.white : const Color(0xFF003580)),
+                                              const SizedBox(width: 6),
+                                              Flexible(
+                                                child: Text(
+                                                  'فتح وتحميل المرفق 📎',
+                                                  style: TextStyle(
+                                                    fontSize: 12,
+                                                    fontWeight: FontWeight.bold,
+                                                    color: isMe ? Colors.white : const Color(0xFF003580),
+                                                    decoration: TextDecoration.underline,
+                                                  ),
+                                                  overflow: TextOverflow.ellipsis,
+                                                ),
+                                              ),
+                                              const SizedBox(width: 4),
+                                              Icon(Icons.open_in_new, size: 13, color: isMe ? Colors.white70 : Colors.grey),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ],
                                   const SizedBox(height: 4),
                                   Row(
                                     mainAxisSize: MainAxisSize.min,
@@ -4712,7 +4941,7 @@ class _MyBookingsScreenState extends State<MyBookingsScreen> {
 }
 
 // ============================================================================
-// 7. PROFILE SCREEN
+// 7. PROFILE SCREEN & EDIT PROFILE SCREEN
 // ============================================================================
 class ProfileScreen extends StatelessWidget {
   final VoidCallback onOpenAuth;
@@ -4724,7 +4953,22 @@ class ProfileScreen extends StatelessWidget {
     final user = MobileState.currentUser;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('الملف الشخصي'), backgroundColor: const Color(0xFF003580), foregroundColor: Colors.white),
+      appBar: AppBar(
+        title: const Text('الملف الشخصي'),
+        backgroundColor: const Color(0xFF003580),
+        foregroundColor: Colors.white,
+        actions: [
+          if (MobileState.isLoggedIn)
+            IconButton(
+              icon: const Icon(Icons.refresh),
+              tooltip: 'تحديث البيانات',
+              onPressed: () async {
+                await MobileState.refreshProfile();
+                onLoginChanged();
+              },
+            ),
+        ],
+      ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(20),
         child: !MobileState.isLoggedIn
@@ -4752,32 +4996,113 @@ class ProfileScreen extends StatelessWidget {
                     radius: 40,
                     backgroundColor: const Color(0xFF003580),
                     child: Text(
-                      (user?['name'] ?? 'U').substring(0, 1),
+                      (user?['name'] != null && user!['name'].toString().isNotEmpty)
+                          ? user['name'].toString().substring(0, 1)
+                          : 'U',
                       style: const TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.bold),
                     ),
                   ),
                   const SizedBox(height: 12),
                   Text(user?['name'] ?? '', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                   Text(user?['email'] ?? '', style: const TextStyle(color: Colors.grey, fontSize: 13)),
-                  const SizedBox(height: 24),
+                  const SizedBox(height: 16),
+
+                  // زر تعديل الملف الشخصي
+                  ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF003580),
+                      foregroundColor: Colors.white,
+                      minimumSize: const Size.fromHeight(46),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      elevation: 2,
+                    ),
+                    onPressed: () async {
+                      await Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => Directionality(
+                            textDirection: TextDirection.rtl,
+                            child: EditProfileScreen(
+                              onSaved: onLoginChanged,
+                            ),
+                          ),
+                        ),
+                      );
+                      onLoginChanged();
+                    },
+                    icon: const Icon(Icons.edit, size: 18),
+                    label: const Text('تعديل الملف الشخصي ✏️', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                  ),
+
+                  const SizedBox(height: 20),
+
+                  // بطاقة البيانات الشخصية
                   Card(
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                     child: Column(
                       children: [
                         ListTile(
-                          leading: const Icon(Icons.phone),
-                          title: const Text('رقم الهاتف'),
-                          subtitle: Text(user?['phone'] ?? '—'),
+                          leading: const Icon(Icons.person, color: Color(0xFF003580)),
+                          title: const Text('الاسم الكامل للعرض', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                          subtitle: Text(user?['name'] ?? '—', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
                         ),
                         const Divider(height: 1),
                         ListTile(
-                          leading: const Icon(Icons.badge_outlined),
-                          title: const Text('نوع الحساب'),
-                          subtitle: Text(user?['role'] ?? 'نزيل / زائر'),
+                          leading: const Icon(Icons.badge_outlined, color: Color(0xFF003580)),
+                          title: const Text('الاسم الأول والأب والكنية', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                          subtitle: Text(
+                            '${user?['first_name'] ?? ''} ${user?['father_name'] ?? ''} ${user?['last_name'] ?? ''}'.trim().isNotEmpty
+                                ? '${user?['first_name'] ?? ''} ${user?['father_name'] ?? ''} ${user?['last_name'] ?? ''}'.trim()
+                                : '—',
+                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                          ),
+                        ),
+                        const Divider(height: 1),
+                        ListTile(
+                          leading: const Icon(Icons.phone, color: Color(0xFF003580)),
+                          title: const Text('رقم الهاتف / الجوال', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                          subtitle: Text(user?['phone'] ?? '—', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                        ),
+                        const Divider(height: 1),
+                        ListTile(
+                          leading: const Icon(Icons.flag_outlined, color: Color(0xFF003580)),
+                          title: const Text('الجنسية', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                          subtitle: Text(user?['nationality'] ?? 'سوري', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                        ),
+                        const Divider(height: 1),
+                        ListTile(
+                          leading: const Icon(Icons.cake_outlined, color: Color(0xFF003580)),
+                          title: const Text('تاريخ الميلاد', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                          subtitle: Text(user?['birth_date'] ?? '—', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                        ),
+                        const Divider(height: 1),
+                        ListTile(
+                          leading: const Icon(Icons.home_outlined, color: Color(0xFF003580)),
+                          title: const Text('عنوان الإقامة / السكن', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                          subtitle: Text(user?['address'] ?? '—', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                        ),
+                        const Divider(height: 1),
+                        ListTile(
+                          leading: const Icon(Icons.credit_card, color: Color(0xFF003580)),
+                          title: const Text('الوثيقة الثبوتية والرقم الوطني', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                          subtitle: Text(
+                            '${(user?['id_type'] == 'passport' ? 'جواز سفر' : (user?['id_type'] == 'residence' ? 'إقامة' : (user?['id_type'] == 'driver_license' ? 'رخصة قيادة' : 'الهوية الوطنية')))}: ${user?['id_number'] ?? user?['national_id'] ?? '—'}',
+                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                          ),
+                        ),
+                        const Divider(height: 1),
+                        ListTile(
+                          leading: const Icon(Icons.verified_user_outlined, color: Color(0xFF003580)),
+                          title: const Text('نوع الحساب وحالة التفعيل', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                          subtitle: Text(
+                            '${user?['role'] ?? 'نزيل'}  •  ${user?['is_verified'] == true ? 'حساب مؤكد ومفعل ✓' : 'بانتظار التفعيل'}',
+                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                          ),
                         ),
                       ],
                     ),
                   ),
+
                   const SizedBox(height: 24),
                   ElevatedButton.icon(
                     style: ElevatedButton.styleFrom(
@@ -4793,8 +5118,391 @@ class ProfileScreen extends StatelessWidget {
                     icon: const Icon(Icons.logout),
                     label: const Text('تسجيل الخروج'),
                   ),
+                  const SizedBox(height: 20),
                 ],
               ),
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// EDIT PROFILE SCREEN (تعديل الملف الشخصي بنفس حقول وترتيب الموقع)
+// ============================================================================
+class EditProfileScreen extends StatefulWidget {
+  final VoidCallback onSaved;
+  const EditProfileScreen({super.key, required this.onSaved});
+
+  @override
+  State<EditProfileScreen> createState() => _EditProfileScreenState();
+}
+
+class _EditProfileScreenState extends State<EditProfileScreen> {
+  final _formKey = GlobalKey<FormState>();
+  final _firstNameCtrl = TextEditingController();
+  final _fatherNameCtrl = TextEditingController();
+  final _lastNameCtrl = TextEditingController();
+  final _nameCtrl = TextEditingController();
+  final _phoneCtrl = TextEditingController();
+  final _nationalityCtrl = TextEditingController(text: 'سوري');
+  final _birthDateCtrl = TextEditingController();
+  final _addressCtrl = TextEditingController();
+  final _idNumberCtrl = TextEditingController();
+  String _idType = 'national_id';
+
+  bool _isLoading = false;
+  String? _errorMessage;
+
+  @override
+  void initState() {
+    super.initState();
+    final u = MobileState.currentUser;
+    if (u != null) {
+      _firstNameCtrl.text = u['first_name'] ?? '';
+      _fatherNameCtrl.text = u['father_name'] ?? '';
+      _lastNameCtrl.text = u['last_name'] ?? '';
+      _nameCtrl.text = u['name'] ?? '';
+      _phoneCtrl.text = u['phone'] ?? '';
+      _nationalityCtrl.text = u['nationality'] ?? 'سوري';
+      _birthDateCtrl.text = u['birth_date'] ?? '';
+      _addressCtrl.text = u['address'] ?? '';
+      _idNumberCtrl.text = u['id_number'] ?? u['national_id'] ?? '';
+      if (u['id_type'] != null && u['id_type'].toString().isNotEmpty) {
+        _idType = u['id_type'];
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _firstNameCtrl.dispose();
+    _fatherNameCtrl.dispose();
+    _lastNameCtrl.dispose();
+    _nameCtrl.dispose();
+    _phoneCtrl.dispose();
+    _nationalityCtrl.dispose();
+    _birthDateCtrl.dispose();
+    _addressCtrl.dispose();
+    _idNumberCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _pickBirthDate() async {
+    final now = DateTime.now();
+    DateTime initial = DateTime(1995, 1, 1);
+    if (_birthDateCtrl.text.isNotEmpty) {
+      try {
+        initial = DateTime.parse(_birthDateCtrl.text);
+      } catch (_) {}
+    }
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: initial,
+      firstDate: DateTime(1930),
+      lastDate: now,
+      helpText: 'اختر تاريخ الميلاد',
+      cancelText: 'إلغاء',
+      confirmText: 'تأكيد',
+    );
+    if (picked != null) {
+      setState(() {
+        _birthDateCtrl.text =
+            '${picked.year}-${picked.month.toString().padLeft(2, '0')}-${picked.day.toString().padLeft(2, '0')}';
+      });
+    }
+  }
+
+  Future<void> _saveProfile() async {
+    if (!_formKey.currentState!.validate()) return;
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    try {
+      final res = await http.post(
+        Uri.parse('${MobileState.apiUrl}/profile'),
+        headers: {
+          'Authorization': 'Bearer ${MobileState.token}',
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: jsonEncode({
+          'first_name': _firstNameCtrl.text.trim(),
+          'father_name': _fatherNameCtrl.text.trim(),
+          'last_name': _lastNameCtrl.text.trim(),
+          'name': _nameCtrl.text.trim(),
+          'phone': _phoneCtrl.text.trim(),
+          'nationality': _nationalityCtrl.text.trim(),
+          'birth_date': _birthDateCtrl.text.trim().isNotEmpty ? _birthDateCtrl.text.trim() : null,
+          'address': _addressCtrl.text.trim().isNotEmpty ? _addressCtrl.text.trim() : null,
+          'id_type': _idType,
+          'id_number': _idNumberCtrl.text.trim().isNotEmpty ? _idNumberCtrl.text.trim() : null,
+          'national_id': _idNumberCtrl.text.trim().isNotEmpty ? _idNumberCtrl.text.trim() : null,
+        }),
+      );
+
+      final body = jsonDecode(res.body);
+      if (res.statusCode == 200 && body['status'] == 'success') {
+        if (body['user'] != null) {
+          await MobileState.saveSession(MobileState.token!, body['user']);
+        }
+        widget.onSaved();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              backgroundColor: Colors.green,
+              content: Text(body['message'] ?? 'تم حفظ وتحديث الملف الشخصي بنجاح'),
+            ),
+          );
+          Navigator.pop(context);
+        }
+      } else {
+        setState(() {
+          _errorMessage = body['message'] ?? 'تعذر حفظ البيانات، يرجى التحقق من المدخلات.';
+        });
+      }
+    } catch (_) {
+      setState(() {
+        _errorMessage = 'حدث خطأ في الاتصال بالسيرفر.';
+      });
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('تعديل الملف الشخصي'),
+        backgroundColor: const Color(0xFF003580),
+        foregroundColor: Colors.white,
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(18),
+        child: Form(
+          key: _formKey,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (_errorMessage != null) ...[
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  margin: const EdgeInsets.only(bottom: 16),
+                  decoration: BoxDecoration(
+                    color: Colors.red.shade50,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.red.shade200),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.error_outline, color: Colors.red),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(_errorMessage!, style: const TextStyle(color: Colors.red, fontSize: 13)),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+
+              // القسم الأول: البيانات الشخصية وبيانات الاتصال
+              Card(
+                elevation: 1,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Row(
+                        children: [
+                          Icon(Icons.person, color: Color(0xFF003580), size: 20),
+                          SizedBox(width: 8),
+                          Text('1. البيانات الشخصية وبيانات الاتصال', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF003580))),
+                        ],
+                      ),
+                      const Divider(height: 24),
+
+                      // الاسم الأول
+                      TextFormField(
+                        controller: _firstNameCtrl,
+                        decoration: const InputDecoration(
+                          labelText: 'الاسم الأول *',
+                          prefixIcon: Icon(Icons.person_outline),
+                          border: OutlineInputBorder(),
+                        ),
+                        validator: (v) => (v == null || v.trim().isEmpty) ? 'الاسم الأول مطلوب' : null,
+                      ),
+                      const SizedBox(height: 12),
+
+                      // اسم الأب
+                      TextFormField(
+                        controller: _fatherNameCtrl,
+                        decoration: const InputDecoration(
+                          labelText: 'اسم الأب *',
+                          prefixIcon: Icon(Icons.person_outline),
+                          border: OutlineInputBorder(),
+                        ),
+                        validator: (v) => (v == null || v.trim().isEmpty) ? 'اسم الأب مطلوب' : null,
+                      ),
+                      const SizedBox(height: 12),
+
+                      // النسبة / الكنية
+                      TextFormField(
+                        controller: _lastNameCtrl,
+                        decoration: const InputDecoration(
+                          labelText: 'النسبة / الكنية *',
+                          prefixIcon: Icon(Icons.person_outline),
+                          border: OutlineInputBorder(),
+                        ),
+                        validator: (v) => (v == null || v.trim().isEmpty) ? 'النسبة / الكنية مطلوبة' : null,
+                      ),
+                      const SizedBox(height: 12),
+
+                      // الاسم الكامل للعرض
+                      TextFormField(
+                        controller: _nameCtrl,
+                        decoration: const InputDecoration(
+                          labelText: 'الاسم الكامل للعرض',
+                          hintText: 'يتم تكوينه تلقائياً إذا ترك فارغاً',
+                          prefixIcon: Icon(Icons.badge_outlined),
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+
+                      // رقم الهاتف / الجوال
+                      TextFormField(
+                        controller: _phoneCtrl,
+                        keyboardType: TextInputType.phone,
+                        decoration: const InputDecoration(
+                          labelText: 'رقم الهاتف / الجوال *',
+                          prefixIcon: Icon(Icons.phone),
+                          border: OutlineInputBorder(),
+                        ),
+                        validator: (v) => (v == null || v.trim().isEmpty) ? 'رقم الهاتف مطلوب' : null,
+                      ),
+                      const SizedBox(height: 12),
+
+                      // الجنسية
+                      TextFormField(
+                        controller: _nationalityCtrl,
+                        decoration: const InputDecoration(
+                          labelText: 'الجنسية',
+                          prefixIcon: Icon(Icons.flag_outlined),
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+
+                      // تاريخ الميلاد
+                      TextFormField(
+                        controller: _birthDateCtrl,
+                        readOnly: true,
+                        onTap: _pickBirthDate,
+                        decoration: InputDecoration(
+                          labelText: 'تاريخ الميلاد',
+                          hintText: 'YYYY-MM-DD',
+                          prefixIcon: const Icon(Icons.cake_outlined),
+                          suffixIcon: IconButton(
+                            icon: const Icon(Icons.calendar_month),
+                            onPressed: _pickBirthDate,
+                          ),
+                          border: const OutlineInputBorder(),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+
+                      // عنوان السكن
+                      TextFormField(
+                        controller: _addressCtrl,
+                        maxLines: 2,
+                        decoration: const InputDecoration(
+                          labelText: 'عنوان السكن / الإقامة الدائم',
+                          prefixIcon: Icon(Icons.home_outlined),
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 16),
+
+              // القسم الثاني: الوثائق الثبوتية
+              Card(
+                elevation: 1,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Row(
+                        children: [
+                          Icon(Icons.assignment_ind, color: Color(0xFF003580), size: 20),
+                          SizedBox(width: 8),
+                          Text('2. الوثائق الثبوتية', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF003580))),
+                        ],
+                      ),
+                      const Divider(height: 24),
+
+                      // نوع الوثيقة
+                      DropdownButtonFormField<String>(
+                        value: _idType,
+                        decoration: const InputDecoration(
+                          labelText: 'نوع الوثيقة',
+                          prefixIcon: Icon(Icons.credit_card),
+                          border: OutlineInputBorder(),
+                        ),
+                        items: const [
+                          DropdownMenuItem(value: 'national_id', child: Text('الهوية الوطنية / البطاقة الشخصية')),
+                          DropdownMenuItem(value: 'passport', child: Text('جواز السفر')),
+                          DropdownMenuItem(value: 'residence', child: Text('بطاقة إقامة')),
+                          DropdownMenuItem(value: 'driver_license', child: Text('رخصة قيادة')),
+                        ],
+                        onChanged: (val) {
+                          if (val != null) setState(() => _idType = val);
+                        },
+                      ),
+                      const SizedBox(height: 12),
+
+                      // رقم الوثيقة
+                      TextFormField(
+                        controller: _idNumberCtrl,
+                        decoration: const InputDecoration(
+                          labelText: 'رقم الوثيقة / الجواز / الرقم الوطني',
+                          prefixIcon: Icon(Icons.numbers),
+                          border: OutlineInputBorder(),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 24),
+
+              ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF003580),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                onPressed: _isLoading ? null : _saveProfile,
+                icon: _isLoading
+                    ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                    : const Icon(Icons.save),
+                label: const Text('حفظ التعديلات', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+              ),
+              const SizedBox(height: 20),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -5084,7 +5792,7 @@ class _AuthBottomSheetState extends State<AuthBottomSheet> {
               try { data = jsonDecode(res.body); } catch (_) {}
 
               if (res.statusCode == 200 && data != null && data['status'] == 'success') {
-                Navigator.pop(ctx);
+                if (ctx.mounted) Navigator.pop(ctx);
                 if (mounted) {
                   _emailCtrl.text = email;
                   _passCtrl.text = pass;
@@ -5223,7 +5931,48 @@ class _AuthBottomSheetState extends State<AuthBottomSheet> {
     );
   }
 
-  void _openGoogleSignInDialog() {
+  Future<void> _signInWithGoogleNative() async {
+    setState(() {
+      _loading = true;
+      _err = null;
+    });
+
+    try {
+      try {
+        await GoogleSignIn.instance.initialize(
+          clientId: '467934742059-hnkanpf5954jqgtu18aubhqpj780et00.apps.googleusercontent.com',
+          serverClientId: '467934742059-hnkanpf5954jqgtu18aubhqpj780et00.apps.googleusercontent.com',
+        );
+      } catch (_) {}
+
+      try {
+        await GoogleSignIn.instance.signOut();
+      } catch (_) {}
+
+      final account = await GoogleSignIn.instance.authenticate(
+        scopeHint: ['email', 'profile'],
+      );
+
+      final email = account.email;
+      final name = account.displayName ?? email.split('@')[0];
+      final googleId = account.id;
+
+      await _executeGoogleLogin(email, name, googleId: googleId);
+    } on GoogleSignInException catch (e) {
+      if (e.code == GoogleSignInExceptionCode.canceled) {
+        if (mounted) setState(() => _loading = false);
+        return;
+      }
+      _openGoogleSignInDialogFallback(e.description ?? e.code.toString());
+    } catch (e) {
+      // If native SDK fails or Google Play Services is missing, fall back to Google dialog
+      _openGoogleSignInDialogFallback(e.toString());
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  void _openGoogleSignInDialogFallback([String? originalError]) {
     final gmailCtrl = TextEditingController(text: _emailCtrl.text.isNotEmpty ? _emailCtrl.text : '');
     final gnameCtrl = TextEditingController(text: _nameCtrl.text.isNotEmpty ? _nameCtrl.text : '');
 
@@ -5329,7 +6078,7 @@ class _AuthBottomSheetState extends State<AuthBottomSheet> {
     );
   }
 
-  Future<void> _executeGoogleLogin(String email, String name) async {
+  Future<void> _executeGoogleLogin(String email, String name, {String? googleId}) async {
     setState(() {
       _loading = true;
       _err = null;
@@ -5342,7 +6091,7 @@ class _AuthBottomSheetState extends State<AuthBottomSheet> {
         body: jsonEncode({
           'email': email,
           'name': name.isNotEmpty ? name : email.split('@')[0],
-          'google_id': 'google_${email.hashCode}',
+          'google_id': (googleId != null && googleId.isNotEmpty) ? googleId : 'google_${email.hashCode}',
         }),
       );
 
@@ -5353,6 +6102,7 @@ class _AuthBottomSheetState extends State<AuthBottomSheet> {
 
       if (res.statusCode == 200 && body != null && body['status'] == 'success') {
         await MobileState.saveSession(body['token'], body['user']);
+        await MobileNotificationService.checkNewNotifications();
         widget.onSuccess();
       } else {
         setState(() => _err = body?['message'] ?? 'تعذر تسجيل الدخول بحساب Google.');
@@ -5505,7 +6255,7 @@ class _AuthBottomSheetState extends State<AuthBottomSheet> {
                   side: BorderSide(color: Colors.grey.shade300),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 ),
-                onPressed: _loading ? null : _openGoogleSignInDialog,
+                onPressed: _loading ? null : _signInWithGoogleNative,
                 icon: const Text('G', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.red)),
                 label: const Text('المتابعة بحساب Google الرسمي'),
               ),

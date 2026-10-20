@@ -4,8 +4,10 @@ namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
 use App\Mail\VerificationCodeMail;
-use Illuminate\Http\Request;
+use App\Models\SiteSetting;
 use App\Models\User;
+use App\Services\NotificationService;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
@@ -91,6 +93,24 @@ class RegisterController extends Controller
                 'email_verified_at' => now(),
                 'verification_code' => null,
             ]);
+
+            try {
+                $welcomeEnabled = SiteSetting::get('app_welcome_enabled', '1') !== '0';
+                if ($welcomeEnabled) {
+                    $welcomeTitle = SiteSetting::get('app_welcome_title', 'أهلاً بك في بوابة حجز الفنادق الذكية 🎉');
+                    $welcomeBody = SiteSetting::get('app_welcome_message', 'يسعدنا انضمامك إلينا! استمتع بأفضل العروض الحصرية وإقامة مميزة في أرقى الفنادق.');
+                    NotificationService::sendToUser(
+                        $user->id,
+                        $welcomeTitle,
+                        $welcomeBody,
+                        'welcome',
+                        '🎉',
+                        route('home')
+                    );
+                }
+            } catch (\Throwable $e) {
+                Log::warning('Welcome notification error (web register): ' . $e->getMessage());
+            }
 
             Auth::login($user);
             session()->forget('pending_verify_user_id');

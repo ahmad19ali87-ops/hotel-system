@@ -98,6 +98,14 @@
                         <span>إرسال إشعار بحدث للجميع ({{ $broadcastNotifications->count() }})</span>
                     </button>
                 </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link py-3 fw-bold rounded-3 d-flex align-items-center justify-content-center gap-2 {{ $activeTab === 'welcome-notification' ? 'active' : '' }}" 
+                            id="welcome-notification-tab" data-bs-toggle="pill" data-bs-target="#welcome-notification-pane" type="button" role="tab"
+                            style="{{ $activeTab === 'welcome-notification' ? 'background-color: #003580;' : '' }}">
+                        <span class="fs-5">🎉</span>
+                        <span>إشعار ورسالة الترحيب الأولى</span>
+                    </button>
+                </li>
             </ul>
         </div>
     </div>
@@ -774,6 +782,112 @@
                 </div>
             </div>
         </div>
+
+        {{-- =============================================================== --}}
+        {{-- TAB 5: WELCOME NOTIFICATION (إشعار ورسالة الترحيب الأولى) --}}
+        {{-- =============================================================== --}}
+        <div class="tab-pane fade {{ $activeTab === 'welcome-notification' ? 'show active' : '' }}" id="welcome-notification-pane" role="tabpanel">
+            <div class="row g-4">
+                {{-- Form Column --}}
+                <div class="col-lg-6">
+                    <div class="card border-0 shadow-sm rounded-4">
+                        <div class="card-header bg-white border-0 pt-4 px-4 pb-0">
+                            <div class="d-flex align-items-center gap-2 mb-2">
+                                <span class="fs-3">🎉</span>
+                                <div>
+                                    <h5 class="fw-bold mb-0 text-dark">رسالة وإشعار الترحيب عند أول تسجيل</h5>
+                                    <small class="text-muted">تصل كإشعار فوري وتنبيه للمشتركين والنزلاء الجدد فور إتمام التسجيل وتأكيد الحساب</small>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="card-body p-4">
+                            <form action="{{ route('admin.app-manager.welcome-notification.update') }}" method="POST">
+                                @csrf
+                                <div class="form-check form-switch p-3 bg-light rounded-3 mb-4 d-flex align-items-center justify-content-between">
+                                    <div>
+                                        <label class="form-check-label fw-bold text-dark d-block mb-1" for="appWelcomeSwitch">
+                                            تفعيل إرسال إشعار الترحيب تلقائياً
+                                        </label>
+                                        <small class="text-muted d-block">عند التفعيل، سيتلقى كل مستخدم جديد يسجل عبر البريد أو جوجل إشعاراً ترحيبياً فور تأكيد حسابه لأول مرة.</small>
+                                    </div>
+                                    <input class="form-check-input ms-0 fs-4" type="checkbox" role="switch" name="app_welcome_enabled" value="1" id="appWelcomeSwitch" {{ $welcomeEnabled ? 'checked' : '' }}>
+                                </div>
+
+                                <div class="mb-3">
+                                    <label class="form-label fw-bold small">عنوان الإشعار الترحيبي *</label>
+                                    <input type="text" name="app_welcome_title" id="welcomeTitleInput" class="form-control rounded-3" required 
+                                           value="{{ old('app_welcome_title', $welcomeTitle) }}"
+                                           placeholder="مثال: أهلاً بك في بوابة حجز الفنادق الذكية 🎉">
+                                </div>
+
+                                <div class="mb-4">
+                                    <label class="form-label fw-bold small">نص رسالة الترحيب *</label>
+                                    <textarea name="app_welcome_message" id="welcomeMsgInput" rows="4" class="form-control rounded-3" required 
+                                              placeholder="اكتب رسالة ترحيبية لطيفة وجذابة للمشترك الجديد...">{{ old('app_welcome_message', $welcomeMessage) }}</textarea>
+                                    <div class="form-text small">تظهر هذه الرسالة في شريط الإشعارات وفي تبويب الإشعارات داخل تطبيق الجوال والموقع.</div>
+                                </div>
+
+                                <div class="d-flex align-items-center justify-content-end gap-2 pt-2 border-top">
+                                    <button type="submit" class="btn text-white rounded-pill px-4 fw-bold shadow-sm" style="background-color: #003580;">
+                                        💾 حفظ إعدادات إشعار الترحيب
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+
+                {{-- Preview Mockup Column --}}
+                <div class="col-lg-6">
+                    <div class="card border-0 shadow-sm rounded-4 h-100 bg-light">
+                        <div class="card-header bg-white border-0 pt-4 px-4 pb-0">
+                            <div class="d-flex align-items-center justify-content-between">
+                                <h6 class="fw-bold mb-0 text-dark">📱 معاينة مظهر الإشعار في هاتف المشترك</h6>
+                                <span class="badge {{ $welcomeEnabled ? 'bg-success' : 'bg-secondary' }} rounded-pill px-3 py-1">
+                                    {{ $welcomeEnabled ? 'الإشعار مفعل حالياً ✅' : 'الإشعار معطل حالياً ⛔' }}
+                                </span>
+                            </div>
+                            <small class="text-muted">هكذا يظهر التنبيه والرسالة الترحيبية على شاشة الهاتف ومركز الإشعارات</small>
+                        </div>
+                        <div class="card-body p-4 d-flex flex-column justify-content-center align-items-center">
+                            {{-- Phone mockup container --}}
+                            <div class="bg-dark rounded-4 p-3 shadow-lg text-white" style="max-width: 380px; width: 100%; border: 3px solid #334155;">
+                                <div class="d-flex justify-content-between align-items-center mb-3 px-1 small text-white-50">
+                                    <span>09:41</span>
+                                    <div class="d-flex gap-1 align-items-center">
+                                        <span>📶</span>
+                                        <span>🔋 100%</span>
+                                    </div>
+                                </div>
+
+                                {{-- Notification card in notification center --}}
+                                <div class="bg-white text-dark rounded-3 p-3 shadow-sm mb-2" style="background: rgba(255,255,255,0.95); backdrop-filter: blur(10px);">
+                                    <div class="d-flex align-items-center justify-content-between mb-2">
+                                        <div class="d-flex align-items-center gap-2">
+                                            <div class="d-flex align-items-center justify-content-center rounded-2 text-white fw-bold" style="background: #003580; width: 28px; height: 28px; font-size: 14px;">
+                                                🏨
+                                            </div>
+                                            <span class="fw-bold small">فنادق سورية &bull; الآن</span>
+                                        </div>
+                                        <span class="badge bg-primary-subtle text-primary border border-primary-subtle rounded-pill px-2 py-0" style="font-size: 11px;">ترحيب جديد</span>
+                                    </div>
+                                    <div class="fw-bold text-dark mb-1 small" id="previewTitleDisplay">
+                                        {{ $welcomeTitle }}
+                                    </div>
+                                    <div class="text-muted small" style="font-size: 12px; line-height: 1.5;" id="previewBodyDisplay">
+                                        {{ $welcomeMessage }}
+                                    </div>
+                                </div>
+
+                                <div class="text-center mt-3 small text-white-50">
+                                    <span>🔒 شاشة القفل / مركز التنبيهات</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -913,5 +1027,25 @@
         </div>
     </div>
 </div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const titleIn = document.getElementById('welcomeTitleInput');
+    const msgIn = document.getElementById('welcomeMsgInput');
+    const titleDisp = document.getElementById('previewTitleDisplay');
+    const bodyDisp = document.getElementById('previewBodyDisplay');
+
+    if (titleIn && titleDisp) {
+        titleIn.addEventListener('input', function() {
+            titleDisp.textContent = this.value || 'عنوان الإشعار';
+        });
+    }
+    if (msgIn && bodyDisp) {
+        msgIn.addEventListener('input', function() {
+            bodyDisp.textContent = this.value || 'نص رسالة الترحيب...';
+        });
+    }
+});
+</script>
 @endsection
 

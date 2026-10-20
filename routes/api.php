@@ -45,9 +45,11 @@ Route::get('/my-complaints', [ComplaintController::class, 'myComplaints']);
 |--------------------------------------------------------------------------
 */
 Route::middleware('auth:sanctum')->group(function () {
-    // Current user info & logout
+    // Current user info & logout & profile
     Route::get('/auth/me', [AuthController::class, 'me']);
     Route::post('/auth/logout', [AuthController::class, 'logout']);
+    Route::get('/profile', [AuthController::class, 'profile']);
+    Route::post('/profile', [AuthController::class, 'updateProfile']);
 
     // Bookings (Guest)
     Route::post('/bookings', [BookingController::class, 'store']);

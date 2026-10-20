@@ -5,6 +5,8 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Mail\PasswordResetMail;
 use App\Mail\VerificationCodeMail;
+use App\Models\Guest;
+use App\Models\SiteSetting;
 use App\Models\User;
 use App\Services\NotificationService;
 use Carbon\Carbon;
@@ -16,6 +18,7 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
@@ -163,6 +166,25 @@ class AuthController extends Controller
         $user->email_verified_at = now();
         $user->save();
 
+        // إرسال إشعار الترحيب الأول القابل للتخصيص من لوحة التحكم
+        try {
+            $welcomeEnabled = SiteSetting::get('app_welcome_enabled', '1') !== '0';
+            if ($welcomeEnabled) {
+                $welcomeTitle = SiteSetting::get('app_welcome_title', 'أهلاً بك في بوابة حجز الفنادق الذكية 🎉');
+                $welcomeBody = SiteSetting::get('app_welcome_message', 'يسعدنا انضمامك إلينا! استمتع بأفضل العروض الحصرية وإقامة مميزة في أرقى الفنادق.');
+                NotificationService::sendToUser(
+                    $user->id,
+                    $welcomeTitle,
+                    $welcomeBody,
+                    'welcome',
+                    '🎉',
+                    route('home')
+                );
+            }
+        } catch (\Throwable $e) {
+            Log::warning('Welcome notification error: ' . $e->getMessage());
+        }
+
         $token = $user->createToken('hotel-app-token')->plainTextToken;
 
         return response()->json([
@@ -249,6 +271,7 @@ class AuthController extends Controller
         }
 
         $user = User::where('email', $email)->first();
+        $isNewUser = false;
 
         if ($user) {
             $user->is_verified = true;
@@ -257,6 +280,7 @@ class AuthController extends Controller
             if (!$user->email_verified_at) $user->email_verified_at = now();
             $user->save();
         } else {
+            $isNewUser = true;
             $user = User::create([
                 'name' => $name,
                 'email' => $email,
@@ -267,6 +291,26 @@ class AuthController extends Controller
                 'is_verified' => true,
                 'email_verified_at' => now(),
             ]);
+        }
+
+        if ($isNewUser) {
+            try {
+                $welcomeEnabled = SiteSetting::get('app_welcome_enabled', '1') !== '0';
+                if ($welcomeEnabled) {
+                    $welcomeTitle = SiteSetting::get('app_welcome_title', 'أهلاً بك في بوابة حجز الفنادق الذكية 🎉');
+                    $welcomeBody = SiteSetting::get('app_welcome_message', 'يسعدنا انضمامك إلينا! استمتع بأفضل العروض الحصرية وإقامة مميزة في أرقى الفنادق.');
+                    NotificationService::sendToUser(
+                        $user->id,
+                        $welcomeTitle,
+                        $welcomeBody,
+                        'welcome',
+                        '🎉',
+                        route('home')
+                    );
+                }
+            } catch (\Throwable $e) {
+                Log::warning('Google login welcome notification error: ' . $e->getMessage());
+            }
         }
 
         // Generate token safely with fallback
@@ -435,14 +479,128 @@ class AuthController extends Controller
             'user' => [
                 'id' => $user->id,
                 'name' => $user->name,
+                'first_name' => $user->first_name,
+                'father_name' => $user->father_name,
+                'last_name' => $user->last_name,
                 'email' => $user->email,
                 'phone' => $user->phone,
+                'nationality' => $user->nationality ?? 'سوري',
+                'birth_date' => $user->birth_date ? (is_string($user->birth_date) ? substr($user->birth_date, 0, 10) : $user->birth_date->format('Y-m-d')) : null,
+                'id_type' => $user->id_type ?? 'national_id',
+                'id_number' => $user->id_number ?: $user->national_id,
+                'national_id' => $user->national_id ?: $user->id_number,
+                'address' => $user->address,
                 'role' => $user->role,
+                'is_verified' => (bool) $user->is_verified,
                 'is_owner' => $user->isHotelOwner(),
                 'permissions' => $user->permissions_list,
                 'hotel_id' => $user->hotel_id,
                 'hotel_name' => $user->hotel?->name,
                 'avatar' => $user->avatar_url,
+                'unread_messages' => $user->unreadMessagesCount(),
+                'unread_notifications' => $user->unreadNotificationsCount(),
+            ],
+        ]);
+    }
+
+    /**
+     * Get full profile for editing.
+     */
+    public function profile(Request $request)
+    {
+        return $this->me($request);
+    }
+
+    /**
+     * Update guest profile with two-way sync.
+     */
+    public function updateProfile(Request $request)
+    {
+        $user = $request->user();
+
+        $validated = $request->validate([
+            'name' => ['nullable', 'string', 'max:255'],
+            'first_name' => ['nullable', 'string', 'max:100'],
+            'father_name' => ['nullable', 'string', 'max:100'],
+            'last_name' => ['nullable', 'string', 'max:100'],
+            'phone' => ['nullable', 'string', 'max:40'],
+            'nationality' => ['nullable', 'string', 'max:100'],
+            'birth_date' => ['nullable', 'date'],
+            'id_type' => ['nullable', 'string', 'max:50'],
+            'id_number' => ['nullable', 'string', 'max:100'],
+            'national_id' => ['nullable', 'string', 'max:100'],
+            'address' => ['nullable', 'string', 'max:255'],
+            'avatar' => ['nullable', 'image', 'max:4096'],
+        ]);
+
+        $fullName = trim(($validated['first_name'] ?? '') . ' ' . ($validated['father_name'] ?? '') . ' ' . ($validated['last_name'] ?? ''));
+        if (empty($fullName)) {
+            $fullName = $validated['name'] ?? $user->name;
+        }
+
+        $idNumber = $validated['id_number'] ?? ($validated['national_id'] ?? $user->id_number);
+
+        if ($request->hasFile('avatar') && $request->file('avatar')->isValid()) {
+            if ($user->avatar) {
+                Storage::disk('public')->delete($user->avatar);
+            }
+            $user->avatar = $request->file('avatar')->store('avatars', 'public');
+        }
+
+        $user->name = $fullName;
+        $user->first_name = $validated['first_name'] ?? $user->first_name;
+        $user->father_name = $validated['father_name'] ?? $user->father_name;
+        $user->last_name = $validated['last_name'] ?? $user->last_name;
+        $user->phone = $validated['phone'] ?? $user->phone;
+        $user->nationality = $validated['nationality'] ?? ($user->nationality ?: 'سوري');
+        $user->birth_date = $validated['birth_date'] ?? $user->birth_date;
+        $user->id_type = $validated['id_type'] ?? ($user->id_type ?: 'national_id');
+        $user->id_number = $idNumber;
+        $user->national_id = $idNumber;
+        $user->address = $validated['address'] ?? $user->address;
+        $user->save();
+
+        try {
+            Guest::where('user_id', $user->id)
+                ->orWhere('email', $user->email)
+                ->update([
+                    'user_id' => $user->id,
+                    'name' => $fullName,
+                    'first_name' => $user->first_name,
+                    'father_name' => $user->father_name,
+                    'last_name' => $user->last_name,
+                    'phone' => $user->phone,
+                    'nationality' => $user->nationality,
+                    'birth_date' => $user->birth_date,
+                    'id_type' => $user->id_type,
+                    'id_number' => $user->id_number,
+                    'national_id' => $user->national_id,
+                    'address' => $user->address,
+                ]);
+        } catch (\Throwable $e) {
+            Log::warning('Guest sync error: ' . $e->getMessage());
+        }
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'تم حفظ وتحديث الملف الشخصي بنجاح ومزامنته مع سجلات النزيل.',
+            'user' => [
+                'id' => $user->id,
+                'name' => $user->name,
+                'first_name' => $user->first_name,
+                'father_name' => $user->father_name,
+                'last_name' => $user->last_name,
+                'email' => $user->email,
+                'phone' => $user->phone,
+                'nationality' => $user->nationality,
+                'birth_date' => $user->birth_date ? (is_string($user->birth_date) ? substr($user->birth_date, 0, 10) : $user->birth_date->format('Y-m-d')) : null,
+                'id_type' => $user->id_type,
+                'id_number' => $user->id_number,
+                'national_id' => $user->national_id,
+                'address' => $user->address,
+                'avatar' => $user->avatar_url,
+                'role' => $user->role,
+                'is_verified' => (bool) $user->is_verified,
                 'unread_messages' => $user->unreadMessagesCount(),
                 'unread_notifications' => $user->unreadNotificationsCount(),
             ],

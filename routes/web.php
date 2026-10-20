@@ -131,6 +131,7 @@ Route::middleware(['auth'])->prefix('admin/app-manager')->name('admin.app-manage
 
     Route::post('/broadcast-message', [\App\Http\Controllers\Admin\AppManagerController::class, 'storeBroadcastMessage'])->name('broadcast-message.store');
     Route::post('/broadcast-notification', [\App\Http\Controllers\Admin\AppManagerController::class, 'storeBroadcastNotification'])->name('broadcast-notification.store');
+    Route::post('/welcome-notification', [\App\Http\Controllers\Admin\AppManagerController::class, 'updateWelcomeNotification'])->name('welcome-notification.update');
     Route::delete('/broadcasts/{broadcast}', [\App\Http\Controllers\Admin\AppManagerController::class, 'destroyBroadcast'])->name('broadcasts.destroy');
 });
 

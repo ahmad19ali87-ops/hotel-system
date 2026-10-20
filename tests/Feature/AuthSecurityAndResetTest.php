@@ -203,3 +203,4 @@ class AuthSecurityAndResetTest extends TestCase
         $this->assertStringContainsString('467934742059-hnkanpf5954jqgtu18aubhqpj780et00.apps.googleusercontent.com', $targetUrl);
     }
 }
+
