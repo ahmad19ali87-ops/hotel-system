@@ -3,10 +3,13 @@
 namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
+use App\Mail\VerificationCodeMail;
 use Illuminate\Http\Request;
 use App\Models\User;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 
 class RegisterController extends Controller
 {
@@ -38,7 +41,14 @@ class RegisterController extends Controller
 
         session(['pending_verify_user_id' => $user->id]);
 
-        return redirect()->route('verification.notice')->with('success', "تم تسجيل حسابك بنجاح! تم إرسال كود التفعيل المكون من 6 أرقام (كود التفعيل الخاص بك هو: {$code}).");
+        // إرسال كود التفعيل عبر البريد الرسمي info@ahmadinsights.online
+        try {
+            Mail::to($user->email)->send(new VerificationCodeMail($user, $code));
+        } catch (\Throwable $e) {
+            Log::error('Failed to send verification email: ' . $e->getMessage());
+        }
+
+        return redirect()->route('verification.notice')->with('success', "تم تسجيل حسابك بنجاح! تم إرسال كود التفعيل إلى بريدك الإلكتروني من (info@ahmadinsights.online). كود التفعيل: {$code}");
     }
 
     public function showVerificationForm()
@@ -105,6 +115,13 @@ class RegisterController extends Controller
         $newCode = str_pad((string) random_int(100000, 999999), 6, '0', STR_PAD_LEFT);
         $user->update(['verification_code' => $newCode]);
 
-        return back()->with('success', "تم إرسال كود تفعيل جديد بنجاح: {$newCode}");
+        // إرسال كود التفعيل الجديد عبر البريد الرسمي info@ahmadinsights.online
+        try {
+            Mail::to($user->email)->send(new VerificationCodeMail($user, $newCode));
+        } catch (\Throwable $e) {
+            Log::error('Failed to resend verification email: ' . $e->getMessage());
+        }
+
+        return back()->with('success', "تم إرسال كود تفعيل جديد بنجاح إلى بريدك من info@ahmadinsights.online: {$newCode}");
     }
 }

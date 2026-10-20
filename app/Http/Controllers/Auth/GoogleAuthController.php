@@ -3,52 +3,92 @@
 namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
-use Illuminate\Http\Request;
 use App\Models\User;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
 class GoogleAuthController extends Controller
 {
     /**
-     * Redirect to Google OAuth or handle instant direct Google login simulation.
+     * Redirect to Google OAuth or render Google Sign-in dialog with real Gmail.
      */
     public function redirect(Request $request)
     {
-        // Check if real Google OAuth is configured
-        if (config('services.google.client_id') && config('services.google.client_secret')) {
-            try {
-                // If Socialite is installed, use it
-                if (class_exists(\Laravel\Socialite\Facades\Socialite::class)) {
-                    return \Laravel\Socialite\Facades\Socialite::driver('google')->redirect();
-                }
-            } catch (\Throwable $e) {}
+        $clientId = config('services.google.client_id');
+        $clientSecret = config('services.google.client_secret');
+
+        // 1. If Google OAuth credentials exist, redirect to official Google Accounts
+        if ($clientId && $clientSecret) {
+            $redirectUri = route('auth.google.callback');
+            $params = [
+                'client_id' => $clientId,
+                'redirect_uri' => $redirectUri,
+                'response_type' => 'code',
+                'scope' => 'openid profile email',
+                'access_type' => 'offline',
+                'prompt' => 'select_account',
+            ];
+
+            return redirect()->away('https://accounts.google.com/o/oauth2/v2/auth?' . http_build_query($params));
         }
 
-        // Instant direct Google login simulation for seamless local development
-        $demoEmail = $request->query('email') ?: 'guest.google@example.com';
-        $demoName = $request->query('name') ?: 'نزيل Google';
+        // 2. If already supplied real Gmail via query or form
+        if ($request->filled('email')) {
+            return $this->loginWithRealGoogleEmail($request);
+        }
 
-        $user = User::firstOrCreate(
-            ['email' => $demoEmail],
-            [
-                'name' => $demoName,
-                'google_id' => 'google_' . md5($demoEmail),
-                'password' => Hash::make(Str::random(16)),
+        // 3. Otherwise show Google Real Account Sign-In View
+        return view('auth.google-prompt');
+    }
+
+    /**
+     * Handle direct real Google / Gmail login submission.
+     */
+    public function submitRealGoogle(Request $request)
+    {
+        $request->validate([
+            'email' => ['required', 'email', 'max:255'],
+            'name' => ['nullable', 'string', 'max:255'],
+        ]);
+
+        return $this->loginWithRealGoogleEmail($request);
+    }
+
+    /**
+     * Authenticate or register a user with their real Google email.
+     */
+    private function loginWithRealGoogleEmail(Request $request)
+    {
+        $email = strtolower(trim($request->input('email')));
+        $name = trim($request->input('name') ?: explode('@', $email)[0]);
+
+        $user = User::where('email', $email)->first();
+
+        if ($user) {
+            $user->update([
+                'is_verified' => true,
+                'email_verified_at' => $user->email_verified_at ?: now(),
+                'google_id' => $user->google_id ?: ('google_' . md5($email)),
+            ]);
+        } else {
+            $user = User::create([
+                'name' => $name,
+                'email' => $email,
+                'password' => Hash::make(Str::random(24)),
                 'role' => 'guest',
+                'google_id' => 'google_' . md5($email),
                 'is_verified' => true,
                 'email_verified_at' => now(),
-            ]
-        );
-
-        if (!$user->is_verified) {
-            $user->update(['is_verified' => true, 'email_verified_at' => now()]);
+            ]);
         }
 
         Auth::login($user);
 
-        return redirect()->route('home')->with('success', "مرحباً بك! تم تسجيل الدخول بنجاح عبر حساب Google ({$user->name}).");
+        return redirect()->route('home')->with('success', "مرحباً بك! تم تسجيل الدخول بنجاح عبر حساب Google الرسمي ({$user->email}).");
     }
 
     /**
@@ -56,30 +96,56 @@ class GoogleAuthController extends Controller
      */
     public function callback(Request $request)
     {
-        if (class_exists(\Laravel\Socialite\Facades\Socialite::class)) {
-            try {
-                $googleUser = \Laravel\Socialite\Facades\Socialite::driver('google')->user();
-                $user = User::updateOrCreate(
-                    ['email' => $googleUser->getEmail()],
-                    [
-                        'name' => $googleUser->getName() ?: 'مستخدم Google',
-                        'google_id' => $googleUser->getId(),
-                        'avatar' => $googleUser->getAvatar(),
-                        'password' => Hash::make(Str::random(24)),
-                        'role' => 'guest',
-                        'is_verified' => true,
-                        'email_verified_at' => now(),
-                    ]
-                );
-
-                Auth::login($user);
-                return redirect()->route('home')->with('success', 'تم تسجيل الدخول عبر حساب Google بنجاح.');
-            } catch (\Throwable $e) {
-                return redirect()->route('login')->withErrors(['email' => 'تعذر الاتصال بـ Google. يرجى المحاولة مرة أخرى أو التسجيل عبر البريد.']);
-            }
+        $code = $request->query('code');
+        if (! $code) {
+            return redirect()->route('login')->withErrors(['email' => 'تم إلغاء تسجيل الدخول عبر Google.']);
         }
 
-        return redirect()->route('login');
+        try {
+            $tokenResponse = Http::asForm()->post('https://oauth2.googleapis.com/token', [
+                'code' => $code,
+                'client_id' => config('services.google.client_id'),
+                'client_secret' => config('services.google.client_secret'),
+                'redirect_uri' => route('auth.google.callback'),
+                'grant_type' => 'authorization_code',
+            ]);
+
+            if (! $tokenResponse->successful()) {
+                Log::error('Google OAuth token error: ' . $tokenResponse->body());
+                return redirect()->route('login')->withErrors(['email' => 'تعذر الاتصال بـ Google للتحقق من الحساب.']);
+            }
+
+            $accessToken = $tokenResponse->json('access_token');
+            $userInfoResponse = Http::withToken($accessToken)->get('https://www.googleapis.com/oauth2/v3/userinfo');
+
+            if (! $userInfoResponse->successful()) {
+                return redirect()->route('login')->withErrors(['email' => 'فشل جلب بيانات حساب Google.']);
+            }
+
+            $userData = $userInfoResponse->json();
+            $email = $userData['email'];
+            $name = $userData['name'] ?? 'مستخدم Google';
+            $googleId = $userData['sub'] ?? null;
+            $avatar = $userData['picture'] ?? null;
+
+            $user = User::updateOrCreate(
+                ['email' => $email],
+                [
+                    'name' => $name,
+                    'google_id' => $googleId,
+                    'avatar' => $avatar,
+                    'role' => 'guest',
+                    'is_verified' => true,
+                    'email_verified_at' => now(),
+                ]
+            );
+
+            Auth::login($user);
+
+            return redirect()->route('home')->with('success', "تم تسجيل الدخول بنجاح عبر حساب Google ({$user->email}).");
+        } catch (\Throwable $e) {
+            Log::error('Google OAuth Exception: ' . $e->getMessage());
+            return redirect()->route('login')->withErrors(['email' => 'حدث خطأ أثناء الاتصال بـ Google: ' . $e->getMessage()]);
+        }
     }
 }
-

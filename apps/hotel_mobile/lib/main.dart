@@ -438,6 +438,392 @@ class _ExploreScreenState extends State<ExploreScreen> {
     if (mounted) setState(() => _isLoading = false);
   }
 
+  void _openSettingsMenu() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: Container(
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 44,
+                height: 5,
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade300,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    'خيارات وإعدادات التطبيق',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF003580)),
+                  ),
+                  IconButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    icon: const Icon(Icons.close, color: Colors.grey),
+                  ),
+                ],
+              ),
+              const Divider(height: 20),
+              ListTile(
+                leading: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(color: Colors.blue.shade50, borderRadius: BorderRadius.circular(10)),
+                  child: const Icon(Icons.language, color: Color(0xFF003580)),
+                ),
+                title: const Text('اللغة (Language)', style: TextStyle(fontWeight: FontWeight.bold)),
+                subtitle: const Text('العربية (افتراضي) / English', style: TextStyle(fontSize: 12)),
+                trailing: const Icon(Icons.chevron_left),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _showLanguageDialog();
+                },
+              ),
+              ListTile(
+                leading: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(color: Colors.amber.shade50, borderRadius: BorderRadius.circular(10)),
+                  child: const Icon(Icons.info_outline, color: Color(0xFFD97706)),
+                ),
+                title: const Text('حول التطبيق (About)', style: TextStyle(fontWeight: FontWeight.bold)),
+                subtitle: const Text('إصدار التطبيق وبيانات المطور المهندس أحمد العلي', style: TextStyle(fontSize: 12)),
+                trailing: const Icon(Icons.chevron_left),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _showAboutDialog();
+                },
+              ),
+              ListTile(
+                leading: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(color: Colors.green.shade50, borderRadius: BorderRadius.circular(10)),
+                  child: const Icon(Icons.help_outline, color: Colors.green),
+                ),
+                title: const Text('مساعدة وتعليمات الاستخدام (Help)', style: TextStyle(fontWeight: FontWeight.bold)),
+                subtitle: const Text('شرح مفصل لطريقة الفلترة والحجز وميزات المنظومة', style: TextStyle(fontSize: 12)),
+                trailing: const Icon(Icons.chevron_left),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _showHelpDialog();
+                },
+              ),
+              const Divider(height: 16),
+              ListTile(
+                dense: true,
+                leading: const Icon(Icons.dns_outlined, size: 20, color: Colors.grey),
+                title: const Text('إعدادات متقدمة (عنوان خادم API)', style: TextStyle(fontSize: 13, color: Colors.grey)),
+                subtitle: Text(MobileState.apiUrl, style: const TextStyle(fontSize: 11, color: Colors.grey), maxLines: 1, overflow: TextOverflow.ellipsis),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _showServerSettings();
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showLanguageDialog() {
+    showDialog(
+      context: context,
+      builder: (ctx) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: const Row(
+            children: [
+              Icon(Icons.language, color: Color(0xFF003580)),
+              SizedBox(width: 8),
+              Text('اختر لغة التطبيق'),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              RadioListTile<String>(
+                title: const Text('العربية (Arabic) 🇸🇾'),
+                value: 'ar',
+                groupValue: 'ar',
+                activeColor: const Color(0xFF003580),
+                onChanged: (_) {
+                  Navigator.pop(ctx);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('اللغة العربية مفعلة حالياً.')),
+                  );
+                },
+              ),
+              RadioListTile<String>(
+                title: const Text('English 🇬🇧'),
+                value: 'en',
+                groupValue: 'ar',
+                activeColor: const Color(0xFF003580),
+                onChanged: (_) {
+                  Navigator.pop(ctx);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('سيتم تفعيل الواجهة الإنجليزية بالكامل في التحديث القادم.')),
+                  );
+                },
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('إغلاق'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showAboutDialog() {
+    showDialog(
+      context: context,
+      builder: (ctx) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(color: const Color(0x1A003580), borderRadius: BorderRadius.circular(12)),
+                child: const Text('🏨', style: TextStyle(fontSize: 22)),
+              ),
+              const SizedBox(width: 10),
+              const Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('حول التطبيق', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF003580))),
+                  Text('بوابة حجز الفنادق الذكية', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                ],
+              ),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF8FAFC),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: const Color(0xFFE2E8F0)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Row(
+                      children: [
+                        Icon(Icons.verified, size: 18, color: Color(0xFF003580)),
+                        SizedBox(width: 6),
+                        Text('رقم الإصدار: ', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                        Text('v1.2.0 (Build 2026.10)', style: TextStyle(color: Color(0xFF003580), fontWeight: FontWeight.bold, fontSize: 13)),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    const Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(Icons.engineering, size: 18, color: Color(0xFFD97706)),
+                        SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            'بناء وتطوير المهندس احمد العلي',
+                            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF0F172A)),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        const Icon(Icons.email_outlined, size: 18, color: Colors.blueGrey),
+                        const SizedBox(width: 6),
+                        const Expanded(
+                          child: Text(
+                            'ahmad19ali87@gmail.com',
+                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF003580)),
+                          ),
+                        ),
+                        InkWell(
+                          onTap: () async {
+                            final uri = Uri.parse('mailto:ahmad19ali87@gmail.com');
+                            if (await canLaunchUrl(uri)) {
+                              await launchUrl(uri);
+                            }
+                          },
+                          child: const Padding(
+                            padding: EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                            child: Icon(Icons.send, size: 16, color: Color(0xFF003580)),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 14),
+              const Text(
+                'المنظومة السحابية المتكاملة لحجز الفنادق وتشغيل المنشآت السياحية في سوريا، تدعم استعراض الغرف الشاغرة بالتواريخ، والأسعار المزدوجة (ل.س / USD)، وتوجيه الخرائط والمحادثات المباشرة.',
+                style: TextStyle(fontSize: 12, height: 1.5, color: Color(0xFF475569)),
+              ),
+            ],
+          ),
+          actions: [
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF003580),
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              ),
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('حسناً'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showHelpDialog() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: Container(
+          height: MediaQuery.of(context).size.height * 0.85,
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Row(
+                      children: [
+                        Icon(Icons.help_outline, color: Color(0xFF003580), size: 24),
+                        SizedBox(width: 8),
+                        Text(
+                          'دليل المساعدة واستخدام التطبيق',
+                          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF003580)),
+                        ),
+                      ],
+                    ),
+                    IconButton(onPressed: () => Navigator.pop(ctx), icon: const Icon(Icons.close)),
+                  ],
+                ),
+              ),
+              const Divider(height: 1),
+              Expanded(
+                child: ListView(
+                  padding: const EdgeInsets.all(16),
+                  children: [
+                    _buildHelpCard(
+                      icon: '🔍',
+                      title: '1. البحث وفلترة الغرف المتاحة بالتواريخ',
+                      content: 'من شريط البحث أعلى الشاشة الرئيسية، حدد تاريخ الوصول وتاريخ المغادرة ثم انقر "تطبيق الفلتر". سيقوم التطبيق باستبعاد جميع الغرف المحجوزة مسبقاً وعرض الغرف الشاغرة فقط لتلك المدة، وعند فتح الفندق ستظهر لك فقط الغرف القابلة للحجز وفق تاريخك.',
+                    ),
+                    const SizedBox(height: 12),
+                    _buildHelpCard(
+                      icon: '💵',
+                      title: '2. الأسعار المزدوجة (ل.س / USD)',
+                      content: 'تتيح لك المنظومة استعراض تكاليف الإقامة بالليرة السورية أو الدولار الأمريكي. يتم التحويل تلقائياً وفق أحدث نشرة أسعار معتمدة رسمياً بالنظام.',
+                    ),
+                    const SizedBox(height: 12),
+                    _buildHelpCard(
+                      icon: '📍',
+                      title: '3. الوصول للفندق عبر خرائط Google',
+                      content: 'عند استعراض أي فندق، انقر على زر "الموقع والاتجاهات (Google Maps)" وسيتم فتح تطبيق الخرائط فورياً ليرسم لك المسار الدقيق للوصول إلى بوابة الفندق.',
+                    ),
+                    const SizedBox(height: 12),
+                    _buildHelpCard(
+                      icon: '💬',
+                      title: '4. الرسائل والتواصل المباشر مع الفندق',
+                      content: 'يمكنك إرسال استفسار خاص لإدارة كل فندق عبر زر "مراسلة الفندق". وتظهر كافة محادثاتك منظمة في تبويب "الرسائل" أسفل الشاشة مثل الماسنجر لتلقي الردود ومتابعتها بسهولة.',
+                    ),
+                    const SizedBox(height: 12),
+                    _buildHelpCard(
+                      icon: '⭐',
+                      title: '5. التقييمات والردود',
+                      content: 'بعد إتمام إقامتك، يمكنك تقييم الفندق وإضافة رأيك وتجربتك. كما تستطيع إدارة الفندق الرد على تقييمك والتعليق عليه بما يضمن أفضل جودة خدمة.',
+                    ),
+                    const SizedBox(height: 12),
+                    _buildHelpCard(
+                      icon: '🔔',
+                      title: '6. الإشعارات خارج التطبيق',
+                      content: 'يعمل نظام الإشعارات حتى عند إغلاق التطبيق لينبهك فوراً بأي تحديث على حجزك، أو استلام رسالة جديدة من الفندق، أو وصول عروض وخصومات مميزة.',
+                    ),
+                    const SizedBox(height: 12),
+                    _buildHelpCard(
+                      icon: '🔑',
+                      title: '7. التسجيل والتفعيل وGoogle',
+                      content: 'عند التسجيل بالبريد، يصلك كود التحقق المكون من 6 أرقام من info@ahmadinsights.online. كما يمكنك التسجيل السريع المباشر بحسابك الحقيقي على Google بنقرة زر واحدة.',
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildHelpCard({required String icon, required String title, required String content}) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text(icon, style: const TextStyle(fontSize: 20)),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  title,
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Color(0xFF003580)),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            content,
+            style: const TextStyle(fontSize: 12.5, height: 1.5, color: Color(0xFF334155)),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _showServerSettings() {
     final ctrl = TextEditingController(text: MobileState.apiUrl);
     showDialog(
@@ -445,21 +831,48 @@ class _ExploreScreenState extends State<ExploreScreen> {
       builder: (ctx) => Directionality(
         textDirection: TextDirection.rtl,
         child: AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
           title: const Text('إعدادات خادم النظام (API)'),
-          content: TextField(
-            controller: ctrl,
-            decoration: const InputDecoration(
-              labelText: 'عنوان الخادم',
-              border: OutlineInputBorder(),
-            ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('يعمل التطبيق افتراضياً وسحابياً على:', style: TextStyle(fontSize: 12, color: Colors.grey)),
+              const SizedBox(height: 4),
+              const Text(
+                MobileState.defaultProductionApiUrl,
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF003580)),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: ctrl,
+                decoration: const InputDecoration(
+                  labelText: 'عنوان الخادم الحالي',
+                  border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.link),
+                ),
+              ),
+            ],
           ),
           actions: [
+            TextButton(
+              onPressed: () {
+                ctrl.text = MobileState.defaultProductionApiUrl;
+              },
+              child: const Text('استعادة الافتراضي'),
+            ),
             TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('إلغاء')),
             ElevatedButton(
-              onPressed: () {
-                MobileState.apiUrl = ctrl.text.trim();
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF003580), foregroundColor: Colors.white),
+              onPressed: () async {
+                await MobileState.setApiUrl(ctrl.text.trim());
+                if (!ctx.mounted) return;
                 Navigator.pop(ctx);
                 _fetchHotels();
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('تم حفظ وتحديث عنوان الخادم: ${MobileState.apiUrl}')),
+                );
               },
               child: const Text('حفظ'),
             ),
@@ -506,7 +919,8 @@ class _ExploreScreenState extends State<ExploreScreen> {
                     ),
                   ),
                   IconButton(
-                    onPressed: _showServerSettings,
+                    onPressed: _openSettingsMenu,
+                    tooltip: 'خيارات وإعدادات التطبيق',
                     icon: const Icon(Icons.settings_outlined, color: Colors.white70),
                   ),
                   if (!MobileState.isLoggedIn)
@@ -4514,7 +4928,123 @@ class _AuthBottomSheetState extends State<AuthBottomSheet> {
     }
   }
 
-  Future<void> _googleLogin() async {
+  Future<void> _resendCode() async {
+    if (_pendingEmail.isEmpty) return;
+    setState(() {
+      _loading = true;
+      _err = null;
+    });
+    try {
+      final res = await http.post(
+        Uri.parse('${MobileState.apiUrl}/auth/resend-code'),
+        headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
+        body: jsonEncode({'email': _pendingEmail}),
+      );
+      final body = jsonDecode(res.body);
+      if (res.statusCode == 200 && body['status'] == 'success') {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('تم إرسال كود تفعيل جديد من info@ahmadinsights.online بنجاح.')),
+        );
+      } else {
+        setState(() => _err = body['message'] ?? 'فشل إعادة الإرسال.');
+      }
+    } catch (_) {
+      setState(() => _err = 'تعذر الاتصال بالخادم.');
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  void _openGoogleSignInDialog() {
+    final gmailCtrl = TextEditingController(text: _emailCtrl.text.isNotEmpty ? _emailCtrl.text : '');
+    final gnameCtrl = TextEditingController(text: _nameCtrl.text.isNotEmpty ? _nameCtrl.text : '');
+
+    showDialog(
+      context: context,
+      builder: (ctx) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(color: Colors.red.shade50, borderRadius: BorderRadius.circular(10)),
+                child: const Text('G', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.red)),
+              ),
+              const SizedBox(width: 10),
+              const Expanded(
+                child: Text('تسجيل الدخول بحساب Google الحقيقي', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+              ),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Text(
+                'أدخل بريدك الإلكتروني الحقيقي على Gmail أو افتح بوابة Google الرسمية لتسجيل الدخول:',
+                style: TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+              ),
+              const SizedBox(height: 14),
+              TextField(
+                controller: gmailCtrl,
+                keyboardType: TextInputType.emailAddress,
+                decoration: InputDecoration(
+                  labelText: 'بريدك على Gmail الحقيقي *',
+                  hintText: 'yourname@gmail.com',
+                  prefixIcon: const Icon(Icons.email_outlined),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: gnameCtrl,
+                decoration: InputDecoration(
+                  labelText: 'اسمك الكامل',
+                  hintText: 'الاسم كما في حساب جوجل',
+                  prefixIcon: const Icon(Icons.person_outline),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+              ),
+              const SizedBox(height: 10),
+              OutlinedButton.icon(
+                icon: const Icon(Icons.open_in_browser, size: 18),
+                label: const Text('فتح صفحة الدخول الرسمية لـ Google في المتصفح', style: TextStyle(fontSize: 11)),
+                onPressed: () async {
+                  final webGoogleUrl = Uri.parse('${MobileState.apiUrl.replaceAll('/api', '')}/auth/google');
+                  if (await canLaunchUrl(webGoogleUrl)) {
+                    await launchUrl(webGoogleUrl, mode: LaunchMode.externalApplication);
+                  }
+                },
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('إلغاء')),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF003580),
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              ),
+              onPressed: () {
+                final email = gmailCtrl.text.trim();
+                final name = gnameCtrl.text.trim();
+                if (email.isEmpty) return;
+                Navigator.pop(ctx);
+                _executeGoogleLogin(email, name);
+              },
+              child: const Text('متابعة الدخول'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _executeGoogleLogin(String email, String name) async {
     setState(() {
       _loading = true;
       _err = null;
@@ -4525,9 +5055,9 @@ class _AuthBottomSheetState extends State<AuthBottomSheet> {
         Uri.parse('${MobileState.apiUrl}/auth/google-login'),
         headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
         body: jsonEncode({
-          'email': 'guest.user@gmail.com',
-          'name': 'مستخدم جوجل (Google User)',
-          'google_id': 'google_123456789',
+          'email': email,
+          'name': name.isNotEmpty ? name : email.split('@')[0],
+          'google_id': 'google_${email.hashCode}',
         }),
       );
 
@@ -4536,9 +5066,11 @@ class _AuthBottomSheetState extends State<AuthBottomSheet> {
       if (res.statusCode == 200 && body['status'] == 'success') {
         await MobileState.saveSession(body['token'], body['user']);
         widget.onSuccess();
+      } else {
+        setState(() => _err = body['message'] ?? 'تعذر تسجيل الدخول بحساب Google.');
       }
     } catch (_) {
-      setState(() => _err = 'تعذر تسجيل الدخول بجوجل.');
+      setState(() => _err = 'تعذر الاتصال بالخادم.');
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -4570,8 +5102,20 @@ class _AuthBottomSheetState extends State<AuthBottomSheet> {
             // Step 1: Verification Code
             if (_isVerifyingCode) ...[
               const Text('رمز تأكيد وتفعيل الحساب 🔑', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold), textAlign: TextAlign.center),
-              const SizedBox(height: 6),
-              Text('أدخل رمز التحقق المكون من 6 أرقام المرسل إلى: $_pendingEmail', textAlign: TextAlign.center, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFEFF6FF),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFFBFDBFE)),
+                ),
+                child: Text(
+                  'تم إرسال كود التفعيل المكون من 6 أرقام من البريد الرسمي (info@ahmadinsights.online) إلى بريدك:\n$_pendingEmail',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontSize: 12, color: Color(0xFF003580), fontWeight: FontWeight.w600, height: 1.5),
+                ),
+              ),
               const SizedBox(height: 16),
               if (_err != null) Text(_err!, style: const TextStyle(color: Colors.red, fontSize: 12), textAlign: TextAlign.center),
               const SizedBox(height: 10),
@@ -4590,6 +5134,12 @@ class _AuthBottomSheetState extends State<AuthBottomSheet> {
                 style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF003580), foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 14)),
                 onPressed: _loading ? null : _submitVerifyCode,
                 child: _loading ? const CircularProgressIndicator(color: Colors.white) : const Text('تأكيد الدخول والتفعيل', style: TextStyle(fontWeight: FontWeight.bold)),
+              ),
+              const SizedBox(height: 8),
+              TextButton.icon(
+                onPressed: _loading ? null : _resendCode,
+                icon: const Icon(Icons.refresh, size: 16),
+                label: const Text('إعادة إرسال رمز التفعيل إلى بريدك'),
               ),
             ]
             // Step 2: Login or Register Form
@@ -4622,10 +5172,14 @@ class _AuthBottomSheetState extends State<AuthBottomSheet> {
 
               // Google Login Option
               OutlinedButton.icon(
-                style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 12)),
-                onPressed: _loading ? null : _googleLogin,
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  side: BorderSide(color: Colors.grey.shade300),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                onPressed: _loading ? null : _openGoogleSignInDialog,
                 icon: const Text('G', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.red)),
-                label: const Text('تسجيل الدخول بواسطة Google / Gmail مباشر'),
+                label: const Text('تسجيل الدخول بحساب Google الحقيقي'),
               ),
               const SizedBox(height: 12),
 

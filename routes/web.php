@@ -62,6 +62,7 @@ Route::post('/verify-code', [RegisterController::class, 'verifyCode'])->name('ve
 Route::post('/verify-code/resend', [RegisterController::class, 'resendCode'])->name('verification.resend');
 
 Route::get('/auth/google', [GoogleAuthController::class, 'redirect'])->name('auth.google');
+Route::post('/auth/google/submit', [GoogleAuthController::class, 'submitRealGoogle'])->name('auth.google.submit');
 Route::get('/auth/google/callback', [GoogleAuthController::class, 'callback'])->name('auth.google.callback');
 Route::get('/locale/{lang}', function (string $lang) {
     if (in_array($lang, ['ar', 'en'])) {

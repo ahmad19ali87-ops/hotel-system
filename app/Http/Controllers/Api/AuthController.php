@@ -3,10 +3,12 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Mail\VerificationCodeMail;
 use App\Models\User;
 use App\Services\NotificationService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -100,6 +102,13 @@ class AuthController extends Controller
             'verification_code' => $verificationCode,
         ]);
 
+        // إرسال كود التفعيل عبر البريد الرسمي info@ahmadinsights.online
+        try {
+            Mail::to($user->email)->send(new VerificationCodeMail($user, $verificationCode));
+        } catch (\Throwable $e) {
+            Log::error('Failed to send verification email (API): ' . $e->getMessage());
+        }
+
         // إرسال إشعار ترحيبي برمز التفعيل
         NotificationService::sendToUser(
             $user->id,
@@ -112,7 +121,7 @@ class AuthController extends Controller
 
         return response()->json([
             'status' => 'success',
-            'message' => 'تم إنشاء الحساب بنجاح! تم إرسال كود التفعيل إلى بريدك الإلكتروني.',
+            'message' => 'تم إنشاء الحساب بنجاح! تم إرسال كود التفعيل إلى بريدك الإلكتروني من (info@ahmadinsights.online).',
             'email' => $user->email,
             'code_hint' => app()->environment('local', 'testing') ? $verificationCode : null,
         ]);
@@ -163,6 +172,39 @@ class AuthController extends Controller
                 'role' => $user->role,
                 'avatar' => $user->avatar_url,
             ],
+        ]);
+    }
+
+    /**
+     * Resend verification code via email.
+     */
+    public function resendCode(Request $request)
+    {
+        $request->validate([
+            'email' => 'required|email',
+        ]);
+
+        $user = User::where('email', $request->email)->first();
+        if (! $user) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'الحساب غير موجود.',
+            ], 404);
+        }
+
+        $code = (string) random_int(100000, 999999);
+        $user->update(['verification_code' => $code]);
+
+        try {
+            Mail::to($user->email)->send(new VerificationCodeMail($user, $code));
+        } catch (\Throwable $e) {
+            Log::error('Failed to resend verification email: ' . $e->getMessage());
+        }
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'تم إرسال كود تفعيل جديد إلى بريدك الإلكتروني من (info@ahmadinsights.online).',
+            'code_hint' => app()->environment('local', 'testing') ? $code : null,
         ]);
     }
 
