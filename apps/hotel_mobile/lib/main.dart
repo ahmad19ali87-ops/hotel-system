@@ -4818,6 +4818,7 @@ class _AuthBottomSheetState extends State<AuthBottomSheet> {
 
   final _emailCtrl = TextEditingController();
   final _passCtrl = TextEditingController();
+  final _passConfirmCtrl = TextEditingController();
   final _nameCtrl = TextEditingController();
   final _phoneCtrl = TextEditingController();
   final _codeCtrl = TextEditingController();
@@ -4862,6 +4863,27 @@ class _AuthBottomSheetState extends State<AuthBottomSheet> {
   }
 
   Future<void> _submitRegister() async {
+    final name = _nameCtrl.text.trim();
+    final email = _emailCtrl.text.trim();
+    final phone = _phoneCtrl.text.trim();
+    final pass = _passCtrl.text;
+    final passConfirm = _passConfirmCtrl.text;
+
+    if (name.isEmpty || email.isEmpty || pass.isEmpty || passConfirm.isEmpty) {
+      setState(() => _err = 'يرجى ملء جميع الحقول المطلوبة (*).');
+      return;
+    }
+
+    if (pass.length < 6) {
+      setState(() => _err = 'يجب ألا تقل كلمة المرور عن 6 أحرف.');
+      return;
+    }
+
+    if (pass != passConfirm) {
+      setState(() => _err = 'تأكيد كلمة المرور غير متطابق.');
+      return;
+    }
+
     setState(() {
       _loading = true;
       _err = null;
@@ -4872,23 +4894,33 @@ class _AuthBottomSheetState extends State<AuthBottomSheet> {
         Uri.parse('${MobileState.apiUrl}/auth/register'),
         headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
         body: jsonEncode({
-          'name': _nameCtrl.text.trim(),
-          'email': _emailCtrl.text.trim(),
-          'phone': _phoneCtrl.text.trim(),
-          'password': _passCtrl.text,
-          'password_confirmation': _passCtrl.text,
+          'name': name,
+          'email': email,
+          'phone': phone,
+          'password': pass,
+          'password_confirmation': passConfirm,
         }),
       );
 
-      final body = jsonDecode(res.body);
+      Map<String, dynamic>? body;
+      try {
+        body = jsonDecode(res.body);
+      } catch (_) {}
 
-      if (res.statusCode == 200 && body['status'] == 'success') {
+      if (res.statusCode == 200 && body != null && body['status'] == 'success') {
         setState(() {
           _isVerifyingCode = true;
-          _pendingEmail = body['email'];
+          _pendingEmail = body?['email'] ?? email;
         });
       } else {
-        setState(() => _err = body['message'] ?? 'فشل إنشاء الحساب.');
+        String msg = body?['message'] ?? 'فشل إنشاء الحساب.';
+        if (body?['errors'] != null && body!['errors'] is Map && (body['errors'] as Map).isNotEmpty) {
+          final firstErr = (body['errors'] as Map).values.first;
+          if (firstErr is List && firstErr.isNotEmpty) {
+            msg = firstErr.first.toString();
+          }
+        }
+        setState(() => _err = msg);
       }
     } catch (_) {
       setState(() => _err = 'تعذر الاتصال بالخادم.');
@@ -4956,6 +4988,241 @@ class _AuthBottomSheetState extends State<AuthBottomSheet> {
     }
   }
 
+  void _openForgotPasswordDialog() {
+    final resetEmailCtrl = TextEditingController(text: _emailCtrl.text.trim());
+    final resetCodeCtrl = TextEditingController();
+    final newPassCtrl = TextEditingController();
+    final newPassConfirmCtrl = TextEditingController();
+
+    int step = 1;
+    bool dialogLoading = false;
+    String? dialogErr;
+    String? dialogSuccess;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          Future<void> sendResetEmail() async {
+            final email = resetEmailCtrl.text.trim();
+            if (email.isEmpty) {
+              setDialogState(() => dialogErr = 'يرجى إدخال البريد الإلكتروني.');
+              return;
+            }
+            setDialogState(() {
+              dialogLoading = true;
+              dialogErr = null;
+              dialogSuccess = null;
+            });
+
+            try {
+              final res = await http.post(
+                Uri.parse('${MobileState.apiUrl}/auth/forgot-password'),
+                headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
+                body: jsonEncode({'email': email}),
+              );
+              Map<String, dynamic>? data;
+              try { data = jsonDecode(res.body); } catch (_) {}
+
+              if (res.statusCode == 200 && data != null && data['status'] == 'success') {
+                setDialogState(() {
+                  step = 2;
+                  dialogLoading = false;
+                  dialogSuccess = 'تم إرسال كود الاستعادة المكون من 6 أرقام من (info@ahmadinsights.online) إلى بريدك.';
+                });
+              } else {
+                setDialogState(() {
+                  dialogLoading = false;
+                  dialogErr = data?['message'] ?? 'هذا البريد غير مسجل كحساب نزيل لدينا.';
+                });
+              }
+            } catch (_) {
+              setDialogState(() {
+                dialogLoading = false;
+                dialogErr = 'تعذر الاتصال بالخادم.';
+              });
+            }
+          }
+
+          Future<void> submitNewPassword() async {
+            final email = resetEmailCtrl.text.trim();
+            final code = resetCodeCtrl.text.trim();
+            final pass = newPassCtrl.text;
+            final passConfirm = newPassConfirmCtrl.text;
+
+            if (code.isEmpty || pass.isEmpty || passConfirm.isEmpty) {
+              setDialogState(() => dialogErr = 'يرجى إكمال جميع الحقول المطلوبة.');
+              return;
+            }
+            if (pass.length < 6) {
+              setDialogState(() => dialogErr = 'يجب ألا تقل كلمة المرور عن 6 أحرف.');
+              return;
+            }
+            if (pass != passConfirm) {
+              setDialogState(() => dialogErr = 'تأكيد كلمة المرور غير متطابق.');
+              return;
+            }
+
+            setDialogState(() {
+              dialogLoading = true;
+              dialogErr = null;
+            });
+
+            try {
+              final res = await http.post(
+                Uri.parse('${MobileState.apiUrl}/auth/reset-password'),
+                headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
+                body: jsonEncode({
+                  'email': email,
+                  'code': code,
+                  'password': pass,
+                  'password_confirmation': passConfirm,
+                }),
+              );
+
+              Map<String, dynamic>? data;
+              try { data = jsonDecode(res.body); } catch (_) {}
+
+              if (res.statusCode == 200 && data != null && data['status'] == 'success') {
+                Navigator.pop(ctx);
+                if (mounted) {
+                  _emailCtrl.text = email;
+                  _passCtrl.text = pass;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('تم تعيين كلمة المرور الجديدة بنجاح! يمكنك الآن تسجيل الدخول.')),
+                  );
+                }
+              } else {
+                setDialogState(() {
+                  dialogLoading = false;
+                  dialogErr = data?['message'] ?? 'كود الاستعادة غير صحيح أو منتهي الصلاحية.';
+                });
+              }
+            } catch (_) {
+              setDialogState(() {
+                dialogLoading = false;
+                dialogErr = 'تعذر الاتصال بالخادم.';
+              });
+            }
+          }
+
+          return Directionality(
+            textDirection: TextDirection.rtl,
+            child: AlertDialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              title: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(color: const Color(0xFFEFF6FF), borderRadius: BorderRadius.circular(10)),
+                    child: const Icon(Icons.lock_reset, color: Color(0xFF003580), size: 24),
+                  ),
+                  const SizedBox(width: 10),
+                  const Expanded(
+                    child: Text('استعادة كلمة المرور', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                  ),
+                ],
+              ),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    if (dialogErr != null)
+                      Container(
+                        margin: const EdgeInsets.only(bottom: 12),
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(color: Colors.red.shade50, borderRadius: BorderRadius.circular(8)),
+                        child: Text(dialogErr!, style: TextStyle(color: Colors.red.shade700, fontSize: 12), textAlign: TextAlign.center),
+                      ),
+                    if (dialogSuccess != null)
+                      Container(
+                        margin: const EdgeInsets.only(bottom: 12),
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(color: Colors.green.shade50, borderRadius: BorderRadius.circular(8)),
+                        child: Text(dialogSuccess!, style: TextStyle(color: Colors.green.shade800, fontSize: 12), textAlign: TextAlign.center),
+                      ),
+
+                    if (step == 1) ...[
+                      const Text(
+                        'خاص بالزبائن المسجلين: أدخل بريدك الإلكتروني وسنرسل لك كود الاستعادة المكون من 6 أرقام من (info@ahmadinsights.online):',
+                        style: TextStyle(fontSize: 12, color: Color(0xFF64748B), height: 1.4),
+                      ),
+                      const SizedBox(height: 14),
+                      TextField(
+                        controller: resetEmailCtrl,
+                        keyboardType: TextInputType.emailAddress,
+                        decoration: InputDecoration(
+                          labelText: 'البريد الإلكتروني المسجل *',
+                          prefixIcon: const Icon(Icons.email_outlined),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                      ),
+                    ] else ...[
+                      const Text(
+                        'أدخل كود الاستعادة المكون من 6 أرقام المرسل إلى بريدك، ثم أدخل كلمة المرور الجديدة:',
+                        style: TextStyle(fontSize: 12, color: Color(0xFF64748B), height: 1.4),
+                      ),
+                      const SizedBox(height: 14),
+                      TextField(
+                        controller: resetCodeCtrl,
+                        keyboardType: TextInputType.number,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(fontWeight: FontWeight.bold, letterSpacing: 4),
+                        decoration: InputDecoration(
+                          labelText: 'كود الاستعادة (6 أرقام) *',
+                          prefixIcon: const Icon(Icons.vpn_key_outlined),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: newPassCtrl,
+                        obscureText: true,
+                        decoration: InputDecoration(
+                          labelText: 'كلمة المرور الجديدة *',
+                          prefixIcon: const Icon(Icons.lock_outline),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: newPassConfirmCtrl,
+                        obscureText: true,
+                        decoration: InputDecoration(
+                          labelText: 'تأكيد كلمة المرور الجديدة *',
+                          prefixIcon: const Icon(Icons.lock_reset),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('إلغاء'),
+                ),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF003580),
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                  onPressed: dialogLoading ? null : (step == 1 ? sendResetEmail : submitNewPassword),
+                  child: dialogLoading
+                      ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                      : Text(step == 1 ? 'إرسال كود الاستعادة' : 'حفظ كلمة المرور'),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
   void _openGoogleSignInDialog() {
     final gmailCtrl = TextEditingController(text: _emailCtrl.text.isNotEmpty ? _emailCtrl.text : '');
     final gnameCtrl = TextEditingController(text: _nameCtrl.text.isNotEmpty ? _nameCtrl.text : '');
@@ -4975,7 +5242,7 @@ class _AuthBottomSheetState extends State<AuthBottomSheet> {
               ),
               const SizedBox(width: 10),
               const Expanded(
-                child: Text('تسجيل الدخول بحساب Google الحقيقي', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                child: Text('تسجيل الدخول بحساب Google الرسمي', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
               ),
             ],
           ),
@@ -4984,10 +5251,39 @@ class _AuthBottomSheetState extends State<AuthBottomSheet> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               const Text(
-                'أدخل بريدك الإلكتروني الحقيقي على Gmail أو افتح بوابة Google الرسمية لتسجيل الدخول:',
-                style: TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+                'يمكنك التوجه مباشرة لصفحة الدخول الرسمية لـ Google Accounts بحسابك الحقيقي أو تأكيد بريدك على Gmail:',
+                style: TextStyle(fontSize: 12, color: Color(0xFF64748B), height: 1.4),
               ),
               const SizedBox(height: 14),
+              ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.white,
+                  foregroundColor: const Color(0xFF1E293B),
+                  side: BorderSide(color: Colors.grey.shade300),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                icon: const Icon(Icons.open_in_browser, color: Color(0xFF003580), size: 20),
+                label: const Text('التوجه المباشر لحساب Google في المتصفح 🌐', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                onPressed: () async {
+                  final webGoogleUrl = Uri.parse('${MobileState.apiUrl.replaceAll('/api', '')}/auth/google');
+                  if (await canLaunchUrl(webGoogleUrl)) {
+                    await launchUrl(webGoogleUrl, mode: LaunchMode.externalApplication);
+                  }
+                },
+              ),
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  Expanded(child: Divider(color: Colors.grey.shade300)),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    child: Text('أو تأكيد Gmail سريعاً', style: TextStyle(fontSize: 11, color: Colors.grey.shade500)),
+                  ),
+                  Expanded(child: Divider(color: Colors.grey.shade300)),
+                ],
+              ),
+              const SizedBox(height: 10),
               TextField(
                 controller: gmailCtrl,
                 keyboardType: TextInputType.emailAddress,
@@ -5007,17 +5303,6 @@ class _AuthBottomSheetState extends State<AuthBottomSheet> {
                   prefixIcon: const Icon(Icons.person_outline),
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                 ),
-              ),
-              const SizedBox(height: 10),
-              OutlinedButton.icon(
-                icon: const Icon(Icons.open_in_browser, size: 18),
-                label: const Text('فتح صفحة الدخول الرسمية لـ Google في المتصفح', style: TextStyle(fontSize: 11)),
-                onPressed: () async {
-                  final webGoogleUrl = Uri.parse('${MobileState.apiUrl.replaceAll('/api', '')}/auth/google');
-                  if (await canLaunchUrl(webGoogleUrl)) {
-                    await launchUrl(webGoogleUrl, mode: LaunchMode.externalApplication);
-                  }
-                },
               ),
             ],
           ),
@@ -5061,13 +5346,16 @@ class _AuthBottomSheetState extends State<AuthBottomSheet> {
         }),
       );
 
-      final body = jsonDecode(res.body);
+      Map<String, dynamic>? body;
+      try {
+        body = jsonDecode(res.body);
+      } catch (_) {}
 
-      if (res.statusCode == 200 && body['status'] == 'success') {
+      if (res.statusCode == 200 && body != null && body['status'] == 'success') {
         await MobileState.saveSession(body['token'], body['user']);
         widget.onSuccess();
       } else {
-        setState(() => _err = body['message'] ?? 'تعذر تسجيل الدخول بحساب Google.');
+        setState(() => _err = body?['message'] ?? 'تعذر تسجيل الدخول بحساب Google.');
       }
     } catch (_) {
       setState(() => _err = 'تعذر الاتصال بالخادم.');
@@ -5111,7 +5399,7 @@ class _AuthBottomSheetState extends State<AuthBottomSheet> {
                   border: Border.all(color: const Color(0xFFBFDBFE)),
                 ),
                 child: Text(
-                  'تم إرسال كود التفعيل المكون من 6 أرقام من البريد الرسمي (info@ahmadinsights.online) إلى بريدك:\n$_pendingEmail',
+                  'تم إرسال كود التفعيل المكون من 6 أرقام من البريد الرسمي (info@ahmadinsights.online) إلى بريدك:\n$_pendingEmail\nيرجى مراجعة صندوق الوارد لإدخال الكود أدناه.',
                   textAlign: TextAlign.center,
                   style: const TextStyle(fontSize: 12, color: Color(0xFF003580), fontWeight: FontWeight.w600, height: 1.5),
                 ),
@@ -5125,7 +5413,7 @@ class _AuthBottomSheetState extends State<AuthBottomSheet> {
                 textAlign: TextAlign.center,
                 style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, letterSpacing: 8),
                 decoration: InputDecoration(
-                  hintText: '123456',
+                  hintText: '------',
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                 ),
               ),
@@ -5153,20 +5441,60 @@ class _AuthBottomSheetState extends State<AuthBottomSheet> {
               if (_err != null) Text(_err!, style: const TextStyle(color: Colors.red, fontSize: 12), textAlign: TextAlign.center),
 
               if (_isRegister) ...[
-                TextField(controller: _nameCtrl, decoration: const InputDecoration(labelText: 'الاسم الكامل', prefixIcon: Icon(Icons.person))),
+                TextField(
+                  controller: _nameCtrl,
+                  decoration: const InputDecoration(labelText: 'الاسم الكامل *', prefixIcon: Icon(Icons.person_outline)),
+                ),
                 const SizedBox(height: 10),
-                TextField(controller: _phoneCtrl, decoration: const InputDecoration(labelText: 'رقم الهاتف', prefixIcon: Icon(Icons.phone))),
+                TextField(
+                  controller: _emailCtrl,
+                  keyboardType: TextInputType.emailAddress,
+                  decoration: const InputDecoration(labelText: 'البريد الإلكتروني *', prefixIcon: Icon(Icons.email_outlined)),
+                ),
                 const SizedBox(height: 10),
+                TextField(
+                  controller: _phoneCtrl,
+                  keyboardType: TextInputType.phone,
+                  decoration: const InputDecoration(labelText: 'رقم الهاتف / الجوال', prefixIcon: Icon(Icons.phone_outlined)),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: _passCtrl,
+                  obscureText: true,
+                  decoration: const InputDecoration(labelText: 'كلمة المرور *', prefixIcon: Icon(Icons.lock_outline)),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: _passConfirmCtrl,
+                  obscureText: true,
+                  decoration: const InputDecoration(labelText: 'تأكيد كلمة المرور *', prefixIcon: Icon(Icons.lock_reset)),
+                ),
+              ] else ...[
+                TextField(
+                  controller: _emailCtrl,
+                  keyboardType: TextInputType.emailAddress,
+                  decoration: const InputDecoration(labelText: 'البريد الإلكتروني *', prefixIcon: Icon(Icons.email_outlined)),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: _passCtrl,
+                  obscureText: true,
+                  decoration: const InputDecoration(labelText: 'كلمة المرور *', prefixIcon: Icon(Icons.lock_outline)),
+                ),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton(
+                    onPressed: _openForgotPasswordDialog,
+                    child: const Text('نسيت كلمة المرور؟', style: TextStyle(fontSize: 12, color: Color(0xFF003580), fontWeight: FontWeight.bold)),
+                  ),
+                ),
               ],
-              TextField(controller: _emailCtrl, decoration: const InputDecoration(labelText: 'البريد الإلكتروني', prefixIcon: Icon(Icons.email))),
-              const SizedBox(height: 10),
-              TextField(controller: _passCtrl, obscureText: true, decoration: const InputDecoration(labelText: 'كلمة المرور', prefixIcon: Icon(Icons.lock))),
-              const SizedBox(height: 20),
+              const SizedBox(height: 16),
 
               ElevatedButton(
                 style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF003580), foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 14)),
                 onPressed: _loading ? null : (_isRegister ? _submitRegister : _submitLogin),
-                child: _loading ? const CircularProgressIndicator(color: Colors.white) : Text(_isRegister ? 'إنشاء الحساب' : 'تسجيل الدخول', style: const TextStyle(fontWeight: FontWeight.bold)),
+                child: _loading ? const CircularProgressIndicator(color: Colors.white) : Text(_isRegister ? 'إكمال التسجيل واستلام كود التفعيل 📨' : 'تسجيل الدخول', style: const TextStyle(fontWeight: FontWeight.bold)),
               ),
               const SizedBox(height: 12),
 
@@ -5179,7 +5507,7 @@ class _AuthBottomSheetState extends State<AuthBottomSheet> {
                 ),
                 onPressed: _loading ? null : _openGoogleSignInDialog,
                 icon: const Text('G', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.red)),
-                label: const Text('تسجيل الدخول بحساب Google الحقيقي'),
+                label: const Text('المتابعة بحساب Google الرسمي'),
               ),
               const SizedBox(height: 12),
 

@@ -20,6 +20,7 @@ use App\Http\Controllers\PublicHotelController;
 use App\Http\Controllers\Admin\InvoiceController as InvoiceController;
 use App\Http\Controllers\Admin\OfferController as HotelOfferController;
 use App\Http\Controllers\Auth\GoogleAuthController;
+use App\Http\Controllers\Auth\ForgotPasswordController;
 use App\Http\Controllers\Auth\RegisterController;
 use App\Http\Controllers\Guest\GuestPortalController;
 use App\Http\Controllers\RoomController;
@@ -61,7 +62,15 @@ Route::get('/verify-code', [RegisterController::class, 'showVerificationForm'])-
 Route::post('/verify-code', [RegisterController::class, 'verifyCode'])->name('verification.verify');
 Route::post('/verify-code/resend', [RegisterController::class, 'resendCode'])->name('verification.resend');
 
+// Password Reset Routes (For registered guests & users)
+Route::get('/forgot-password', [ForgotPasswordController::class, 'showLinkRequestForm'])->middleware('guest')->name('password.request');
+Route::post('/forgot-password', [ForgotPasswordController::class, 'sendResetLinkEmail'])->middleware('guest')->name('password.email');
+Route::get('/reset-password/{token?}', [ForgotPasswordController::class, 'showResetForm'])->middleware('guest')->name('password.reset');
+Route::post('/reset-password', [ForgotPasswordController::class, 'reset'])->middleware('guest')->name('password.update');
+
 Route::get('/auth/google', [GoogleAuthController::class, 'redirect'])->name('auth.google');
+Route::get('/auth/google/prompt', [GoogleAuthController::class, 'prompt'])->name('auth.google.prompt');
+Route::post('/auth/google/one-tap', [GoogleAuthController::class, 'oneTap'])->name('auth.google.one-tap');
 Route::post('/auth/google/submit', [GoogleAuthController::class, 'submitRealGoogle'])->name('auth.google.submit');
 Route::get('/auth/google/callback', [GoogleAuthController::class, 'callback'])->name('auth.google.callback');
 Route::get('/locale/{lang}', function (string $lang) {

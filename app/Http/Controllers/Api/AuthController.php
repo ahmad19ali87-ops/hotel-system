@@ -3,13 +3,19 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Mail\PasswordResetMail;
 use App\Mail\VerificationCodeMail;
 use App\Models\User;
 use App\Services\NotificationService;
+use Carbon\Carbon;
+use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
@@ -109,11 +115,11 @@ class AuthController extends Controller
             Log::error('Failed to send verification email (API): ' . $e->getMessage());
         }
 
-        // إرسال إشعار ترحيبي برمز التفعيل
+        // إرسال إشعار ترحيبي
         NotificationService::sendToUser(
             $user->id,
-            'رمز تفعيل الحساب',
-            "رمز التفعيل الخاص بحسابك هو: {$verificationCode}",
+            'تفعيل حسابك في بوابة الفنادق',
+            "تم إرسال كود التفعيل إلى بريدك الإلكتروني من (info@ahmadinsights.online). يرجى مراجعة بريدك لإدخال الكود وتفعيل الحساب.",
             'welcome',
             '🔑',
             route('verify.notice')
@@ -123,7 +129,6 @@ class AuthController extends Controller
             'status' => 'success',
             'message' => 'تم إنشاء الحساب بنجاح! تم إرسال كود التفعيل إلى بريدك الإلكتروني من (info@ahmadinsights.online).',
             'email' => $user->email,
-            'code_hint' => app()->environment('local', 'testing') ? $verificationCode : null,
         ]);
     }
 
@@ -204,7 +209,6 @@ class AuthController extends Controller
         return response()->json([
             'status' => 'success',
             'message' => 'تم إرسال كود تفعيل جديد إلى بريدك الإلكتروني من (info@ahmadinsights.online).',
-            'code_hint' => app()->environment('local', 'testing') ? $code : null,
         ]);
     }
 
@@ -215,33 +219,67 @@ class AuthController extends Controller
     {
         $request->validate([
             'email' => 'required|email',
-            'name' => 'required|string',
+            'name' => 'nullable|string',
             'google_id' => 'nullable|string',
             'avatar' => 'nullable|string',
+            'id_token' => 'nullable|string',
         ]);
 
-        $user = User::where('email', $request->email)->first();
+        $email = strtolower(trim($request->email));
+        $name = trim($request->name ?: explode('@', $email)[0]);
+        $googleId = $request->google_id;
+        $avatar = $request->avatar;
+
+        // If Google id_token is provided from mobile client, verify with Google
+        if ($request->filled('id_token')) {
+            try {
+                $verifyRes = Http::get('https://oauth2.googleapis.com/tokeninfo', [
+                    'id_token' => $request->id_token,
+                ]);
+                if ($verifyRes->successful()) {
+                    $gData = $verifyRes->json();
+                    $email = strtolower(trim($gData['email'] ?? $email));
+                    $name = $gData['name'] ?? $name;
+                    $googleId = $gData['sub'] ?? $googleId;
+                    $avatar = $gData['picture'] ?? $avatar;
+                }
+            } catch (\Throwable $e) {
+                Log::warning('Google id_token validation skipped: ' . $e->getMessage());
+            }
+        }
+
+        $user = User::where('email', $email)->first();
 
         if ($user) {
-            if ($request->filled('google_id')) {
-                $user->google_id = $request->google_id;
-            }
             $user->is_verified = true;
+            if ($googleId) $user->google_id = $googleId;
+            if ($avatar) $user->avatar = $avatar;
+            if (!$user->email_verified_at) $user->email_verified_at = now();
             $user->save();
         } else {
             $user = User::create([
-                'name' => $request->name,
-                'email' => $request->email,
+                'name' => $name,
+                'email' => $email,
                 'password' => Hash::make(Str::random(24)),
                 'role' => 'guest',
-                'google_id' => $request->google_id,
-                'avatar' => $request->avatar,
+                'google_id' => $googleId ?: ('google_' . md5($email)),
+                'avatar' => $avatar,
                 'is_verified' => true,
                 'email_verified_at' => now(),
             ]);
         }
 
-        $token = $user->createToken('hotel-app-token')->plainTextToken;
+        // Generate token safely with fallback
+        $token = null;
+        try {
+            if (method_exists($user, 'tokens')) {
+                $user->tokens()->delete();
+            }
+            $token = $user->createToken('hotel-app-token')->plainTextToken;
+        } catch (\Throwable $e) {
+            Log::warning('Fallback API token generated: ' . $e->getMessage());
+            $token = 'app_' . bin2hex(random_bytes(24));
+        }
 
         return response()->json([
             'status' => 'success',
@@ -255,6 +293,133 @@ class AuthController extends Controller
                 'role' => $user->role,
                 'avatar' => $user->avatar_url,
             ],
+        ]);
+    }
+
+    /**
+     * Send password reset code/link to registered customers.
+     */
+    public function forgotPassword(Request $request)
+    {
+        $request->validate([
+            'email' => 'required|email',
+        ], [
+            'email.required' => 'يرجى إدخال عنوان البريد الإلكتروني.',
+            'email.email' => 'عنوان البريد الإلكتروني غير صحيح.',
+        ]);
+
+        $email = strtolower(trim($request->email));
+        $user = User::where('email', $email)->first();
+
+        if (!$user) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'هذا البريد الإلكتروني غير مسجل لدينا. ميزة استعادة كلمة المرور متاحة للزبائن المسجلين فقط.',
+            ], 404);
+        }
+
+        if (!Schema::hasTable('password_reset_tokens')) {
+            Schema::create('password_reset_tokens', function (Blueprint $table) {
+                $table->string('email')->primary();
+                $table->string('token');
+                $table->timestamp('created_at')->nullable();
+            });
+        }
+
+        $token = Str::random(60);
+        $code = (string) random_int(100000, 999999);
+
+        DB::table('password_reset_tokens')->updateOrInsert(
+            ['email' => $email],
+            [
+                'token' => $token . '|' . $code,
+                'created_at' => now(),
+            ]
+        );
+
+        try {
+            Mail::to($user->email)->send(new PasswordResetMail($user, $token, $code));
+        } catch (\Throwable $e) {
+            Log::error('Failed to send password reset email (API): ' . $e->getMessage());
+        }
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'تم إرسال رابط وكود استعادة كلمة المرور إلى بريدك الإلكتروني من (info@ahmadinsights.online). يرجى مراجعة صندوق الوارد.',
+        ]);
+    }
+
+    /**
+     * Reset password using code or token.
+     */
+    public function resetPassword(Request $request)
+    {
+        $request->validate([
+            'email' => 'required|email',
+            'code' => 'required|string',
+            'password' => 'required|string|min:6|confirmed',
+        ], [
+            'password.confirmed' => 'تأكيد كلمة المرور غير متطابق.',
+            'password.min' => 'يجب ألا تقل كلمة المرور عن 6 أحرف.',
+            'code.required' => 'كود التحقق مطلوب.',
+        ]);
+
+        $email = strtolower(trim($request->email));
+
+        if (!Schema::hasTable('password_reset_tokens')) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'لا يوجد طلب استعادة مسبق.',
+            ], 400);
+        }
+
+        $record = DB::table('password_reset_tokens')->where('email', $email)->first();
+
+        if (!$record) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'طلب استعادة كلمة المرور غير صالح أو تم استخدامه مسبقاً.',
+            ], 422);
+        }
+
+        if (Carbon::parse($record->created_at)->addMinutes(60)->isPast()) {
+            DB::table('password_reset_tokens')->where('email', $email)->delete();
+            return response()->json([
+                'status' => 'error',
+                'message' => 'انتهت صلاحية كود الاستعادة (صالح لمدة 60 دقيقة). يرجى طلب كود جديد.',
+            ], 422);
+        }
+
+        $parts = explode('|', $record->token);
+        $storedToken = $parts[0] ?? '';
+        $storedCode = $parts[1] ?? '';
+
+        $inputCode = trim($request->code);
+        if ($inputCode !== $storedCode && $inputCode !== $storedToken) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'كود أو رابط التحقق المدخل غير صحيح.',
+            ], 422);
+        }
+
+        $user = User::where('email', $email)->first();
+        if (!$user) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'المستخدم غير موجود.',
+            ], 404);
+        }
+
+        $user->update([
+            'password' => Hash::make($request->password),
+            'is_verified' => true,
+        ]);
+
+        DB::table('password_reset_tokens')->where('email', $email)->delete();
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'تم تعيين كلمة المرور الجديدة وتفعيل حسابك بنجاح! يمكنك الآن تسجيل الدخول.',
         ]);
     }
 

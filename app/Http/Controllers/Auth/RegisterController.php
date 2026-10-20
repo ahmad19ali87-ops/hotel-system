@@ -48,7 +48,7 @@ class RegisterController extends Controller
             Log::error('Failed to send verification email: ' . $e->getMessage());
         }
 
-        return redirect()->route('verification.notice')->with('success', "تم تسجيل حسابك بنجاح! تم إرسال كود التفعيل إلى بريدك الإلكتروني من (info@ahmadinsights.online). كود التفعيل: {$code}");
+        return redirect()->route('verification.notice')->with('success', "تم تسجيل حسابك بنجاح! تم إرسال كود التفعيل المكون من 6 أرقام إلى بريدك الإلكتروني من (info@ahmadinsights.online). يرجى مراجعة صندوق الوارد والرسائل غير المرغوب فيها لتفعيل الحساب.");
     }
 
     public function showVerificationForm()
@@ -69,7 +69,6 @@ class RegisterController extends Controller
 
         return view('auth.verify-code', [
             'user' => $user,
-            'code' => $user->verification_code,
         ]);
     }
 
@@ -122,6 +121,6 @@ class RegisterController extends Controller
             Log::error('Failed to resend verification email: ' . $e->getMessage());
         }
 
-        return back()->with('success', "تم إرسال كود تفعيل جديد بنجاح إلى بريدك من info@ahmadinsights.online: {$newCode}");
+        return back()->with('success', "تم إرسال كود تفعيل جديد بنجاح إلى بريدك الإلكتروني من (info@ahmadinsights.online). يرجى مراجعة صندوق الوارد.");
     }
 }

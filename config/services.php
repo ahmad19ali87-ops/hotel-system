@@ -36,9 +36,9 @@ return [
     ],
 
     'google' => [
-        'client_id' => env('GOOGLE_CLIENT_ID'),
+        'client_id' => env('GOOGLE_CLIENT_ID', '467934742059-hnkanpf5954jqgtu18aubhqpj780et00.apps.googleusercontent.com'),
         'client_secret' => env('GOOGLE_CLIENT_SECRET'),
-        'redirect' => env('GOOGLE_REDIRECT_URI'),
+        'redirect' => env('GOOGLE_REDIRECT_URI', 'https://hotel.ahmadinsights.online/auth/google/callback'),
     ],
 
 ];

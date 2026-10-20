@@ -27,11 +27,9 @@
                     </div>
                 @endif
 
-                @if(isset($code) && $code)
-                    <div class="p-3 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-800 dark:text-amber-300 text-xs font-bold text-center mb-4">
-                        🔑 رمز التفعيل السريع الخاص بك: <span class="tracking-widest text-base font-black px-2 py-0.5 rounded-lg bg-amber-500/20">{{ $code }}</span>
-                    </div>
-                @endif
+                <div class="p-3 rounded-2xl bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900 text-blue-800 dark:text-blue-300 text-xs font-medium text-center mb-4">
+                    📨 تم إرسال كود التفعيل المكون من 6 أرقام إلى بريدك الإلكتروني ({{ $user->email ?? 'المسجل' }}) من <strong class="text-blue-900 dark:text-blue-200">info@ahmadinsights.online</strong>. يرجى مراجعة صندوق الوارد والرسائل غير المرغوب فيها وإدخال الكود أدناه.
+                </div>
 
                 <form method="POST" action="{{ route('verification.verify') }}">
                     @csrf
@@ -42,7 +40,7 @@
                         </label>
                         <input id="code" type="text" maxlength="6" inputmode="numeric" 
                                class="form-control form-control-lg text-center tracking-widest font-black text-2xl py-3 rounded-2xl border-2 @error('code') is-invalid @enderror" 
-                               name="code" value="{{ old('code', $code ?? '') }}" required autofocus placeholder="------">
+                               name="code" value="{{ old('code') }}" required autofocus placeholder="------">
                         @error('code')
                             <div class="invalid-feedback text-xs font-bold text-start">{{ $message }}</div>
                         @enderror

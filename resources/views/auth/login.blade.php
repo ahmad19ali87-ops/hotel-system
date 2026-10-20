@@ -47,7 +47,12 @@
                     </div>
 
                     <div class="mb-4">
-                        <label class="form-label font-bold text-xs text-slate-600 dark:text-slate-300">كلمة المرور <span class="text-rose-500">*</span></label>
+                        <div class="d-flex justify-content-between align-items-center mb-1">
+                            <label class="form-label font-bold text-xs text-slate-600 dark:text-slate-300 mb-0">كلمة المرور <span class="text-rose-500">*</span></label>
+                            <a href="{{ route('password.request') }}" class="text-xs font-bold text-blue-600 dark:text-blue-400 text-decoration-none hover:underline">
+                                نسيت كلمة المرور؟
+                            </a>
+                        </div>
                         <input type="password" name="password" class="form-control rounded-xl py-2.5 px-3 text-sm @error('password') is-invalid @enderror" required placeholder="••••••••">
                     </div>
 

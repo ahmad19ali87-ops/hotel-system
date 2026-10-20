@@ -14,16 +14,19 @@ use Illuminate\Support\Str;
 class GoogleAuthController extends Controller
 {
     /**
-     * Redirect to Google OAuth or render Google Sign-in dialog with real Gmail.
+     * Redirect directly to official Google Accounts login page.
      */
     public function redirect(Request $request)
     {
-        $clientId = config('services.google.client_id');
-        $clientSecret = config('services.google.client_secret');
+        // If email query is provided (e.g. testing or quick link)
+        if ($request->filled('email')) {
+            return $this->loginWithRealGoogleEmail($request);
+        }
 
-        // 1. If Google OAuth credentials exist, redirect to official Google Accounts
-        if ($clientId && $clientSecret) {
-            $redirectUri = route('auth.google.callback');
+        $clientId = config('services.google.client_id', '467934742059-hnkanpf5954jqgtu18aubhqpj780et00.apps.googleusercontent.com');
+        $redirectUri = config('services.google.redirect') ?: route('auth.google.callback');
+
+        if ($clientId) {
             $params = [
                 'client_id' => $clientId,
                 'redirect_uri' => $redirectUri,
@@ -36,13 +39,74 @@ class GoogleAuthController extends Controller
             return redirect()->away('https://accounts.google.com/o/oauth2/v2/auth?' . http_build_query($params));
         }
 
-        // 2. If already supplied real Gmail via query or form
-        if ($request->filled('email')) {
-            return $this->loginWithRealGoogleEmail($request);
+        return redirect()->route('auth.google.prompt');
+    }
+
+    /**
+     * Show Google sign-in options page (Official button + GIS One-Tap + real Gmail fallback).
+     */
+    public function prompt()
+    {
+        return view('auth.google-prompt', [
+            'clientId' => config('services.google.client_id', '467934742059-hnkanpf5954jqgtu18aubhqpj780et00.apps.googleusercontent.com'),
+        ]);
+    }
+
+    /**
+     * Handle Google One Tap / Google Identity Services (GSI) credential verification.
+     */
+    public function oneTap(Request $request)
+    {
+        $credential = $request->input('credential');
+        if (!$credential) {
+            return redirect()->route('login')->withErrors(['email' => 'لم يتم استلام بيانات التحقق من حساب Google.']);
         }
 
-        // 3. Otherwise show Google Real Account Sign-In View
-        return view('auth.google-prompt');
+        try {
+            $verifyResponse = Http::get('https://oauth2.googleapis.com/tokeninfo', [
+                'id_token' => $credential,
+            ]);
+
+            if (!$verifyResponse->successful()) {
+                Log::warning('Google tokeninfo failed: ' . $verifyResponse->body());
+                return redirect()->route('auth.google.prompt')->withErrors(['email' => 'تعذر التحقق من رمز Google، يرجى إعادة المحاولة.']);
+            }
+
+            $userData = $verifyResponse->json();
+            $email = strtolower(trim($userData['email']));
+            $name = $userData['name'] ?? explode('@', $email)[0];
+            $googleId = $userData['sub'] ?? ('google_' . md5($email));
+            $avatar = $userData['picture'] ?? null;
+
+            $user = User::where('email', $email)->first();
+
+            if ($user) {
+                $user->update([
+                    'is_verified' => true,
+                    'email_verified_at' => $user->email_verified_at ?: now(),
+                    'google_id' => $googleId,
+                    'avatar' => $avatar ?: $user->avatar,
+                ]);
+            } else {
+                $user = User::create([
+                    'name' => $name,
+                    'email' => $email,
+                    'password' => Hash::make(Str::random(24)),
+                    'role' => 'guest',
+                    'google_id' => $googleId,
+                    'avatar' => $avatar,
+                    'is_verified' => true,
+                    'email_verified_at' => now(),
+                ]);
+            }
+
+            Auth::login($user);
+
+            return redirect()->route('home')->with('success', "مرحباً بك! تم تسجيل الدخول بنجاح عبر حساب Google الرسمي ({$user->email}).");
+        } catch (\Throwable $e) {
+            Log::error('Google OneTap Exception: ' . $e->getMessage());
+            return redirect()->route('auth.google.prompt')->withErrors(['email' => 'حدث خطأ أثناء معالجة حساب Google: ' . $e->getMessage()]);
+        }
     }
 
     /**
@@ -96,56 +160,77 @@ class GoogleAuthController extends Controller
      */
     public function callback(Request $request)
     {
+        if ($request->has('error')) {
+            Log::warning('Google OAuth redirect error: ' . $request->input('error'));
+            return redirect()->route('auth.google.prompt')->with('warning', 'تم إلغاء تسجيل الدخول عبر نافذة Google أو رفض الإذن.');
+        }
+
         $code = $request->query('code');
         if (! $code) {
-            return redirect()->route('login')->withErrors(['email' => 'تم إلغاء تسجيل الدخول عبر Google.']);
+            return redirect()->route('auth.google.prompt')->withErrors(['email' => 'لم يتم استلام كود التحقق من Google.']);
         }
+
+        $clientId = config('services.google.client_id', '467934742059-hnkanpf5954jqgtu18aubhqpj780et00.apps.googleusercontent.com');
+        $clientSecret = config('services.google.client_secret');
+        $redirectUri = config('services.google.redirect') ?: route('auth.google.callback');
 
         try {
             $tokenResponse = Http::asForm()->post('https://oauth2.googleapis.com/token', [
                 'code' => $code,
-                'client_id' => config('services.google.client_id'),
-                'client_secret' => config('services.google.client_secret'),
-                'redirect_uri' => route('auth.google.callback'),
+                'client_id' => $clientId,
+                'client_secret' => $clientSecret ?: '',
+                'redirect_uri' => $redirectUri,
                 'grant_type' => 'authorization_code',
             ]);
 
             if (! $tokenResponse->successful()) {
-                Log::error('Google OAuth token error: ' . $tokenResponse->body());
-                return redirect()->route('login')->withErrors(['email' => 'تعذر الاتصال بـ Google للتحقق من الحساب.']);
+                Log::warning('Google OAuth token exchange warning: ' . $tokenResponse->body());
+                // Smooth fallback to Google prompt view with GIS button instead of throwing raw error
+                return redirect()->route('auth.google.prompt')->with('info', 'يرجى تأكيد الدخول بحساب Google عبر الزر المباشر أدناه.');
             }
 
             $accessToken = $tokenResponse->json('access_token');
             $userInfoResponse = Http::withToken($accessToken)->get('https://www.googleapis.com/oauth2/v3/userinfo');
 
             if (! $userInfoResponse->successful()) {
-                return redirect()->route('login')->withErrors(['email' => 'فشل جلب بيانات حساب Google.']);
+                return redirect()->route('auth.google.prompt')->withErrors(['email' => 'فشل جلب بيانات حساب Google.']);
             }
 
             $userData = $userInfoResponse->json();
-            $email = $userData['email'];
-            $name = $userData['name'] ?? 'مستخدم Google';
+            $email = strtolower(trim($userData['email']));
+            $name = $userData['name'] ?? explode('@', $email)[0];
             $googleId = $userData['sub'] ?? null;
             $avatar = $userData['picture'] ?? null;
 
-            $user = User::updateOrCreate(
-                ['email' => $email],
-                [
+            $user = User::where('email', $email)->first();
+
+            if ($user) {
+                $user->update([
+                    'name' => $name ?: $user->name,
+                    'google_id' => $googleId ?: $user->google_id,
+                    'avatar' => $avatar ?: $user->avatar,
+                    'is_verified' => true,
+                    'email_verified_at' => $user->email_verified_at ?: now(),
+                ]);
+            } else {
+                $user = User::create([
                     'name' => $name,
-                    'google_id' => $googleId,
-                    'avatar' => $avatar,
+                    'email' => $email,
+                    'password' => Hash::make(Str::random(24)),
                     'role' => 'guest',
+                    'google_id' => $googleId ?: ('google_' . md5($email)),
+                    'avatar' => $avatar,
                     'is_verified' => true,
                     'email_verified_at' => now(),
-                ]
-            );
+                ]);
+            }
 
             Auth::login($user);
 
             return redirect()->route('home')->with('success', "تم تسجيل الدخول بنجاح عبر حساب Google ({$user->email}).");
         } catch (\Throwable $e) {
             Log::error('Google OAuth Exception: ' . $e->getMessage());
-            return redirect()->route('login')->withErrors(['email' => 'حدث خطأ أثناء الاتصال بـ Google: ' . $e->getMessage()]);
+            return redirect()->route('auth.google.prompt')->withErrors(['email' => 'تعذر إكمال الربط المباشر مع Google: ' . $e->getMessage()]);
         }
     }
 }

@@ -20,6 +20,8 @@ Route::prefix('auth')->group(function () {
     Route::post('/verify-code', [AuthController::class, 'verifyCode']);
     Route::post('/resend-code', [AuthController::class, 'resendCode']);
     Route::post('/google-login', [AuthController::class, 'googleLogin']);
+    Route::post('/forgot-password', [AuthController::class, 'forgotPassword']);
+    Route::post('/reset-password', [AuthController::class, 'resetPassword']);
 });
 
 Route::get('/hotels', [HotelController::class, 'index']);
