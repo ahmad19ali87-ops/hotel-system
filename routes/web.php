@@ -58,6 +58,7 @@ Route::get('/downloads/android', function () {
 
 Route::get('/register', [RegisterController::class, 'showRegistrationForm'])->middleware('guest')->name('register');
 Route::post('/register', [RegisterController::class, 'register'])->middleware('guest');
+Route::get('/captcha/refresh', [RegisterController::class, 'refreshCaptcha'])->name('captcha.refresh');
 Route::get('/verify-code', [RegisterController::class, 'showVerificationForm'])->name('verification.notice');
 Route::post('/verify-code', [RegisterController::class, 'verifyCode'])->name('verification.verify');
 Route::post('/verify-code/resend', [RegisterController::class, 'resendCode'])->name('verification.resend');

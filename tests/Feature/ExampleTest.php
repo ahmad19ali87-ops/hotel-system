@@ -87,6 +87,8 @@ class ExampleTest extends TestCase
             $table->string('job_title')->nullable();
             $table->text('permissions')->nullable();
             $table->string('verification_code', 10)->nullable();
+            $table->timestamp('verification_code_sent_at')->nullable();
+            $table->unsignedInteger('verification_attempts')->default(0);
             $table->boolean('is_verified')->default(false);
             $table->string('first_name')->nullable();
             $table->string('father_name')->nullable();

@@ -10,6 +10,7 @@ use App\Models\Hotel;
 use App\Models\Message;
 use App\Models\SiteSetting;
 use App\Models\User;
+use App\Services\FileSecurityService;
 use App\Services\NotificationService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -73,7 +74,7 @@ class AppManagerController extends Controller
 
         $imagePath = null;
         if ($request->hasFile('image_file')) {
-            $imagePath = $request->file('image_file')->store('destinations', 'public');
+            $imagePath = FileSecurityService::validateImage($request->file('image_file'));
         } elseif (!empty($validated['image_url'])) {
             $imagePath = trim($validated['image_url']);
         }
@@ -120,7 +121,7 @@ class AppManagerController extends Controller
             if ($imagePath && !str_starts_with($imagePath, 'http')) {
                 Storage::disk('public')->delete($imagePath);
             }
-            $imagePath = $request->file('image_file')->store('destinations', 'public');
+            $imagePath = FileSecurityService::validateImage($request->file('image_file'));
         } elseif (!empty($validated['image_url'])) {
             $imagePath = trim($validated['image_url']);
         }
@@ -184,7 +185,7 @@ class AppManagerController extends Controller
 
         $imagePath = null;
         if ($request->hasFile('image_file')) {
-            $imagePath = $request->file('image_file')->store('app_banners', 'public');
+            $imagePath = FileSecurityService::validateImage($request->file('image_file'));
         } elseif (!empty($validated['image_url'])) {
             $imagePath = trim($validated['image_url']);
         }
@@ -237,7 +238,7 @@ class AppManagerController extends Controller
             if ($imagePath && !str_starts_with($imagePath, 'http')) {
                 Storage::disk('public')->delete($imagePath);
             }
-            $imagePath = $request->file('image_file')->store('app_banners', 'public');
+            $imagePath = FileSecurityService::validateImage($request->file('image_file'));
         } elseif (!empty($validated['image_url'])) {
             $imagePath = trim($validated['image_url']);
         }
@@ -301,7 +302,7 @@ class AppManagerController extends Controller
 
         $attachmentPath = null;
         if ($request->hasFile('attachment') && $request->file('attachment')->isValid()) {
-            $attachmentPath = $request->file('attachment')->store('messages/attachments', 'public');
+            $attachmentPath = FileSecurityService::validateAttachment($request->file('attachment'), 5120);
         }
 
         // Determine recipients

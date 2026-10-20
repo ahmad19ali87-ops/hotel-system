@@ -38,6 +38,8 @@ class User extends Authenticatable
         'address',
         'attachments',
         'verification_code',
+        'verification_code_sent_at',
+        'verification_attempts',
         'is_verified',
         'password',
         'role',
@@ -106,6 +108,8 @@ class User extends Authenticatable
     {
         return [
             'email_verified_at' => 'datetime',
+            'verification_code_sent_at' => 'datetime',
+            'verification_attempts' => 'integer',
             'password' => 'hashed',
             'is_verified' => 'boolean',
             'birth_date' => 'date',

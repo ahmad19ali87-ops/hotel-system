@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Controller;
 use App\Models\Hotel;
 use App\Models\User;
+use App\Services\FileSecurityService;
 use App\Support\StorageFolderManager;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -80,7 +81,7 @@ class HotelController extends Controller
 
         $logoPath = null;
         if ($request->hasFile('logo')) {
-            $logoPath = $request->file('logo')->store('hotels', 'public');
+            $logoPath = FileSecurityService::validateImage($request->file('logo'));
         } elseif (is_string($request->logo)) {
             $logoPath = $request->logo;
         }
@@ -89,7 +90,7 @@ class HotelController extends Controller
         if ($request->hasFile('images')) {
             foreach ($request->file('images') as $img) {
                 if ($img instanceof \Illuminate\Http\UploadedFile) {
-                    $imagePaths[] = $img->store('hotels', 'public');
+                    $imagePaths[] = FileSecurityService::validateImage($img);
                 }
             }
         }
@@ -255,7 +256,7 @@ class HotelController extends Controller
             if ($hotel->logo) {
                 Storage::disk('public')->delete($hotel->logo);
             }
-            $hotel->logo = $request->file('logo')->store('hotels/logos', 'public');
+            $hotel->logo = FileSecurityService::validateImage($request->file('logo'));
         }
 
         // تحديث معرض الصور مع دعم الحذف الفردي والإضافة
@@ -279,7 +280,7 @@ class HotelController extends Controller
         // رفع وإضافة الصور الجديدة
         if ($request->hasFile('images')) {
             foreach ($request->file('images') as $image) {
-                $existingImages[] = $image->store('hotels/gallery', 'public');
+                $existingImages[] = FileSecurityService::validateImage($image);
             }
         }
 

@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Guest;
 use App\Models\Message;
 use App\Models\User;
+use App\Services\FileSecurityService;
 use App\Services\NotificationService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -98,7 +99,7 @@ class MessageController extends Controller
 
         $attachmentPath = null;
         if ($request->hasFile('attachment') && $request->file('attachment')->isValid()) {
-            $attachmentPath = $request->file('attachment')->store('messages/attachments', 'public');
+            $attachmentPath = FileSecurityService::validateAttachment($request->file('attachment'), 10240);
         }
 
         $message = Message::create([

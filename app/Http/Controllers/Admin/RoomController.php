@@ -6,6 +6,7 @@ use Illuminate\Http\Request;
 use App\Models\Room;
 use App\Models\RoomType;
 use App\Models\Hotel;
+use App\Services\FileSecurityService;
 
 class RoomController extends Controller
 {
@@ -40,9 +41,9 @@ class RoomController extends Controller
         $images = [];
         if ($request->hasFile('images')) {
             foreach ($request->images as $img) {
-                $name = time() . '_' . $img->getClientOriginalName();
-                $img->move(public_path('uploads/rooms'), $name);
-                $images[] = $name;
+
+                $images[] = FileSecurityService::validateImage($img);
+
             }
         }
 
@@ -81,9 +82,9 @@ class RoomController extends Controller
 
         if ($request->hasFile('images')) {
             foreach ($request->images as $img) {
-                $name = time() . '_' . $img->getClientOriginalName();
-                $img->move(public_path('uploads/rooms'), $name);
-                $images[] = $name;
+
+                $images[] = FileSecurityService::validateImage($img);
+
             }
         }
 

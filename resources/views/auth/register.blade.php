@@ -35,7 +35,7 @@
                 <form action="{{ route('register') }}" method="POST">
                     @csrf
 
-                    @if($errors->any())
+                    @if($errors->any() && !$errors->has('captcha_answer'))
                         <div class="alert alert-danger rounded-2xl text-xs font-semibold mb-3">
                             {{ $errors->first() }}
                         </div>
@@ -56,7 +56,7 @@
                         <input type="tel" name="phone" class="form-control rounded-xl py-2.5 px-3 text-sm @error('phone') is-invalid @enderror" value="{{ old('phone') }}" placeholder="+963 9XXXXXXXX">
                     </div>
 
-                    <div class="row g-2 mb-4">
+                    <div class="row g-2 mb-3">
                         <div class="col-6">
                             <label class="form-label font-bold text-xs text-slate-600 dark:text-slate-300">كلمة المرور <span class="text-rose-500">*</span></label>
                             <input type="password" name="password" class="form-control rounded-xl py-2.5 px-3 text-sm @error('password') is-invalid @enderror" required placeholder="••••••••">
@@ -65,6 +65,30 @@
                             <label class="form-label font-bold text-xs text-slate-600 dark:text-slate-300">تأكيد كلمة المرور <span class="text-rose-500">*</span></label>
                             <input type="password" name="password_confirmation" class="form-control rounded-xl py-2.5 px-3 text-sm" required placeholder="••••••••">
                         </div>
+                    </div>
+
+                    {{-- Math Captcha Anti-Bot Security Block --}}
+                    <div class="mb-4 p-3 bg-slate-50 dark:bg-slate-900/50 rounded-2xl border border-slate-200 dark:border-slate-700">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <label class="form-label font-bold text-xs text-slate-700 dark:text-slate-300 mb-0">
+                                🛡️ التحقق الأمني البشري (Captcha) <span class="text-rose-500">*</span>
+                            </label>
+                            <button type="button" id="refresh-captcha-btn" class="btn btn-sm btn-link text-decoration-none text-xs p-0 text-blue-600 font-bold">
+                                🔄 مسألة أخرى
+                            </button>
+                        </div>
+                        <div class="d-flex align-items-center gap-2">
+                            <span id="captcha-question" class="badge bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 border border-slate-300 dark:border-slate-600 px-3 py-2 text-sm font-black rounded-xl">
+                                {{ $captcha['question'] ?? 'ما حاصل 7 + 5 ؟' }}
+                            </span>
+                            <input type="text" name="captcha_answer" id="captcha_answer" class="form-control rounded-xl py-2 px-3 text-sm font-bold text-center @error('captcha_answer') is-invalid @enderror" required placeholder="الناتج (أرقام)" autocomplete="off">
+                        </div>
+                        <p class="text-[11px] text-slate-500 mt-1 mb-0" id="captcha-hint">
+                            {{ $captcha['hint'] ?? 'أدخل الإجابة بالأرقام للتحقق من أنك إنسان' }}
+                        </p>
+                        @error('captcha_answer')
+                            <div class="text-danger text-xs mt-1 font-bold">{{ $message }}</div>
+                        @enderror
                     </div>
 
                     <button type="submit" class="btn btn-primary w-100 py-3 rounded-2xl font-bold shadow-lg shadow-blue-600/30 text-sm">
@@ -82,4 +106,27 @@
         </div>
     </div>
 </div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const refreshBtn = document.getElementById('refresh-captcha-btn');
+    if (refreshBtn) {
+        refreshBtn.addEventListener('click', function() {
+            refreshBtn.classList.add('opacity-50');
+            fetch('{{ route('captcha.refresh') }}')
+                .then(res => res.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        document.getElementById('captcha-question').textContent = data.question;
+                        document.getElementById('captcha-hint').textContent = data.hint;
+                        document.getElementById('captcha_answer').value = '';
+                        document.getElementById('captcha_answer').focus();
+                    }
+                })
+                .catch(err => console.error('Error refreshing captcha:', err))
+                .finally(() => refreshBtn.classList.remove('opacity-50'));
+        });
+    }
+});
+</script>
 @endsection

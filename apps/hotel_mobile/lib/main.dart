@@ -5956,8 +5956,12 @@ class _AuthBottomSheetState extends State<AuthBottomSheet> {
       final email = account.email;
       final name = account.displayName ?? email.split('@')[0];
       final googleId = account.id;
+      String? idToken;
+      try {
+        idToken = account.authentication.idToken;
+      } catch (_) {}
 
-      await _executeGoogleLogin(email, name, googleId: googleId);
+      await _executeGoogleLogin(email, name, googleId: googleId, idToken: idToken);
     } on GoogleSignInException catch (e) {
       if (e.code == GoogleSignInExceptionCode.canceled) {
         if (mounted) setState(() => _loading = false);
@@ -6078,7 +6082,7 @@ class _AuthBottomSheetState extends State<AuthBottomSheet> {
     );
   }
 
-  Future<void> _executeGoogleLogin(String email, String name, {String? googleId}) async {
+  Future<void> _executeGoogleLogin(String email, String name, {String? googleId, String? idToken}) async {
     setState(() {
       _loading = true;
       _err = null;
@@ -6092,6 +6096,7 @@ class _AuthBottomSheetState extends State<AuthBottomSheet> {
           'email': email,
           'name': name.isNotEmpty ? name : email.split('@')[0],
           'google_id': (googleId != null && googleId.isNotEmpty) ? googleId : 'google_${email.hashCode}',
+          if (idToken != null && idToken.isNotEmpty) 'id_token': idToken,
         }),
       );
 

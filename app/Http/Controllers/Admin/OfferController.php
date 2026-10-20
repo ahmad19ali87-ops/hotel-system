@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Models\Offer;
 use App\Models\Hotel;
+use App\Services\FileSecurityService;
 use App\Services\NotificationService;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Storage;
@@ -46,7 +47,7 @@ class OfferController extends Controller
 
         $imagePath = null;
         if ($request->hasFile('image') && $request->file('image')->isValid()) {
-            $imagePath = $request->file('image')->store('offers', 'public');
+            $imagePath = FileSecurityService::validateImage($request->file('image'));
         }
 
         $offer = Offer::create([
@@ -108,7 +109,7 @@ class OfferController extends Controller
             if ($offer->image) {
                 Storage::disk('public')->delete($offer->image);
             }
-            $offer->image = $request->file('image')->store('offers', 'public');
+            $offer->image = FileSecurityService::validateImage($request->file('image'));
         }
 
         $offer->update([

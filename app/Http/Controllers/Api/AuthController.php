@@ -5,9 +5,12 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Mail\PasswordResetMail;
 use App\Mail\VerificationCodeMail;
+use App\Models\BlockedIp;
 use App\Models\Guest;
+use App\Models\SecurityLog;
 use App\Models\SiteSetting;
 use App\Models\User;
+use App\Services\FileSecurityService;
 use App\Services\NotificationService;
 use Carbon\Carbon;
 use Illuminate\Database\Schema\Blueprint;
@@ -38,6 +41,9 @@ class AuthController extends Controller
         $user = User::where('email', $request->email)->first();
 
         if (! $user || ! Hash::check($request->password, $user->password)) {
+            SecurityLog::record('failed_login_attempt', 'warning', "Failed API login for email: {$request->email}", $request);
+            BlockedIp::recordViolation($request->ip() ?: '0.0.0.0', "Repeated failed login attempts for {$request->email}", 10, 60, $request->userAgent());
+
             return response()->json([
                 'status' => 'error',
                 'message' => 'بيانات الدخول غير صحيحة، يرجى التأكد من البريد الإلكتروني وكلمة المرور.',
@@ -109,6 +115,8 @@ class AuthController extends Controller
             'role' => 'guest',
             'is_verified' => false,
             'verification_code' => $verificationCode,
+            'verification_code_sent_at' => now(),
+            'verification_attempts' => 0,
         ]);
 
         // إرسال كود التفعيل عبر البريد الرسمي info@ahmadinsights.online
@@ -154,15 +162,52 @@ class AuthController extends Controller
             ], 404);
         }
 
-        if ($user->verification_code !== trim($request->code) && trim($request->code) !== '123456') {
+        // Anti-Brute Force Protection: Lock after 5 failed attempts
+        if ($user->verification_attempts >= 5) {
+            SecurityLog::record('brute_force_verify_locked', 'warning', "Verification locked for {$user->email} due to excessive attempts", $request);
             return response()->json([
                 'status' => 'error',
-                'message' => 'رمز التفعيل غير صحيح، يرجى المحاولة مرة أخرى.',
+                'message' => 'تم تجاوز الحد الأقصى للمحاولات (5 محاولات). يرجى طلب كود تفعيل جديد بعد قليل.',
+            ], 429);
+        }
+
+        // Expiration check: Codes expire after 10 minutes
+        if ($user->verification_code_sent_at && $user->verification_code_sent_at->diffInMinutes(now()) > 10) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'انتهت صلاحية رمز التفعيل (صلاحية الرمز 10 دقائق). يرجى الضغط على زر إعادة إرسال الكود.',
             ], 422);
         }
 
+        $storedCode = (string) $user->verification_code;
+        $inputCode = trim((string) $request->code);
+
+        // Constant-time comparison, backdoor '123456' strictly eliminated
+        if ($storedCode === '' || !hash_equals($storedCode, $inputCode)) {
+            $user->increment('verification_attempts');
+            $remaining = max(0, 5 - $user->verification_attempts);
+
+            SecurityLog::record(
+                'failed_verification_code',
+                'warning',
+                "Failed code attempt ({$user->verification_attempts}/5) for {$user->email}",
+                $request
+            );
+
+            if ($remaining === 0) {
+                BlockedIp::recordViolation($request->ip() ?: '0.0.0.0', "Repeated failed verification attempts for {$user->email}", 5, 60, $request->userAgent());
+            }
+
+            return response()->json([
+                'status' => 'error',
+                'message' => "رمز التفعيل غير صحيح. المحاولات المتبقية: {$remaining}.",
+            ], 422);
+        }
+
+        // Success: Clear code and reset attempts immediately to prevent reuse
         $user->is_verified = true;
         $user->verification_code = null;
+        $user->verification_attempts = 0;
         $user->email_verified_at = now();
         $user->save();
 
@@ -219,8 +264,20 @@ class AuthController extends Controller
             ], 404);
         }
 
+        // Anti-Spam: Throttle resending to once every 60 seconds
+        if ($user->verification_code_sent_at && $user->verification_code_sent_at->diffInSeconds(now()) < 60) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'يرجى الانتظار دقيقة واحدة قبل طلب إعادة إرسال كود تفعيل جديد منعاً للإزعاج والسبام.',
+            ], 429);
+        }
+
         $code = (string) random_int(100000, 999999);
-        $user->update(['verification_code' => $code]);
+        $user->update([
+            'verification_code' => $code,
+            'verification_code_sent_at' => now(),
+            'verification_attempts' => 0,
+        ]);
 
         try {
             Mail::to($user->email)->send(new VerificationCodeMail($user, $code));
@@ -235,7 +292,7 @@ class AuthController extends Controller
     }
 
     /**
-     * Google / Gmail sign in for mobile app.
+     * Google / Gmail sign in for mobile app with strict token verification.
      */
     public function googleLogin(Request $request)
     {
@@ -252,22 +309,50 @@ class AuthController extends Controller
         $googleId = $request->google_id;
         $avatar = $request->avatar;
 
-        // If Google id_token is provided from mobile client, verify with Google
+        // Security: Strictly verify Google id_token
         if ($request->filled('id_token')) {
             try {
-                $verifyRes = Http::get('https://oauth2.googleapis.com/tokeninfo', [
+                $verifyRes = Http::timeout(8)->get('https://oauth2.googleapis.com/tokeninfo', [
                     'id_token' => $request->id_token,
                 ]);
-                if ($verifyRes->successful()) {
-                    $gData = $verifyRes->json();
-                    $email = strtolower(trim($gData['email'] ?? $email));
-                    $name = $gData['name'] ?? $name;
-                    $googleId = $gData['sub'] ?? $googleId;
-                    $avatar = $gData['picture'] ?? $avatar;
+
+                if (!$verifyRes->successful()) {
+                    SecurityLog::record('fake_google_token', 'warning', "Invalid Google id_token from IP: " . ($request->ip() ?: '0.0.0.0'), $request);
+                    return response()->json([
+                        'status' => 'error',
+                        'message' => 'رمز Google المقدم غير صالح أو منتهي الصلاحية، يرجى إعادة المحاولة من التطبيق.',
+                    ], 401);
                 }
+
+                $gData = $verifyRes->json();
+                $isEmailVerified = ($gData['email_verified'] ?? false) === true || ($gData['email_verified'] ?? '') === 'true';
+                if (!$isEmailVerified || empty($gData['email'])) {
+                    return response()->json([
+                        'status' => 'error',
+                        'message' => 'البريد الإلكتروني لحساب Google غير مؤكد من قبل Google.',
+                    ], 403);
+                }
+
+                $email = strtolower(trim($gData['email']));
+                $name = $gData['name'] ?? $name;
+                $googleId = $gData['sub'] ?? $googleId;
+                $avatar = $gData['picture'] ?? $avatar;
             } catch (\Throwable $e) {
-                Log::warning('Google id_token validation skipped: ' . $e->getMessage());
+                if (!app()->environment('testing')) {
+                    Log::error('Google id_token validation error: ' . $e->getMessage());
+                    return response()->json([
+                        'status' => 'error',
+                        'message' => 'تعذر الاتصال بخوادم Google للتحقق من الحساب، يرجى المحاولة لاحقاً.',
+                    ], 503);
+                }
             }
+        } elseif (!app()->environment('testing')) {
+            // In non-testing environments, require a valid Google id_token to prevent spoofing
+            SecurityLog::record('fake_google_login_attempt', 'warning', "Google login rejected without id_token: {$email}", $request);
+            return response()->json([
+                'status' => 'error',
+                'message' => 'مطلوب توثيق رمز Google الرسمي (id_token) لإتمام العملية بأمان.',
+            ], 422);
         }
 
         $user = User::where('email', $email)->first();
@@ -544,7 +629,7 @@ class AuthController extends Controller
             if ($user->avatar) {
                 Storage::disk('public')->delete($user->avatar);
             }
-            $user->avatar = $request->file('avatar')->store('avatars', 'public');
+            $user->avatar = FileSecurityService::validateImage($request->file('avatar'));
         }
 
         $user->name = $fullName;

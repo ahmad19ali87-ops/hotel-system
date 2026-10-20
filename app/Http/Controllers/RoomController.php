@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Room;
 use App\Models\RoomType;
+use App\Services\FileSecurityService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
@@ -49,7 +50,7 @@ class RoomController extends Controller
         $room->hotel_id = $hotelId;
 
         if ($request->hasFile('image')) {
-            $room->image = $request->file('image')->store('rooms', 'public');
+            $room->image = FileSecurityService::validateImage($request->file('image'));
         }
 
         $room->save();
@@ -92,7 +93,7 @@ class RoomController extends Controller
             if ($room->image) {
                 Storage::disk('public')->delete($room->image);
             }
-            $room->image = $request->file('image')->store('rooms', 'public');
+            $room->image = FileSecurityService::validateImage($request->file('image'));
         }
         $room->save();
 

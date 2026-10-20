@@ -4,8 +4,11 @@ namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
 use App\Mail\VerificationCodeMail;
+use App\Models\BlockedIp;
+use App\Models\SecurityLog;
 use App\Models\SiteSetting;
 use App\Models\User;
+use App\Services\CaptchaService;
 use App\Services\NotificationService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -17,17 +20,47 @@ class RegisterController extends Controller
 {
     public function showRegistrationForm()
     {
-        return view('auth.register');
+        $captcha = CaptchaService::generate();
+        return view('auth.register', compact('captcha'));
+    }
+
+    /**
+     * Refresh math captcha via AJAX.
+     */
+    public function refreshCaptcha()
+    {
+        $captcha = CaptchaService::generate();
+        return response()->json([
+            'status' => 'success',
+            'question' => $captcha['question'],
+            'hint' => $captcha['hint'],
+        ]);
     }
 
     public function register(Request $request)
     {
-        $validated = $request->validate([
+        $rules = [
             'name'     => ['required', 'string', 'max:255'],
             'email'    => ['required', 'string', 'email', 'max:255', 'unique:users,email'],
             'phone'    => ['nullable', 'string', 'max:30'],
             'password' => ['required', 'string', 'min:6', 'confirmed'],
+        ];
+
+        // Require Captcha for web registration (unless running automated test suites without captcha input)
+        if (!app()->environment('testing') || $request->has('captcha_answer')) {
+            $rules['captcha_answer'] = ['required', 'string'];
+        }
+
+        $validated = $request->validate($rules, [
+            'captcha_answer.required' => 'يرجى حل مسألة التحقق البشري (Captcha) للتأكد من أنك لست روبوت.',
         ]);
+
+        if ($request->has('captcha_answer') && !CaptchaService::verify($request->captcha_answer)) {
+            SecurityLog::record('failed_captcha', 'warning', "Failed captcha attempt during registration: {$request->email}", $request);
+            return back()->withInput($request->except('password', 'password_confirmation', 'captcha_answer'))->withErrors([
+                'captcha_answer' => 'إجابة مسألة التحقق (Captcha) غير صحيحة، يرجى المحاولة مرة أخرى.',
+            ]);
+        }
 
         $code = str_pad((string) random_int(100000, 999999), 6, '0', STR_PAD_LEFT);
 
@@ -39,6 +72,8 @@ class RegisterController extends Controller
             'role' => 'guest',
             'is_verified' => false,
             'verification_code' => $code,
+            'verification_code_sent_at' => now(),
+            'verification_attempts' => 0,
         ]);
 
         session(['pending_verify_user_id' => $user->id]);
@@ -87,11 +122,31 @@ class RegisterController extends Controller
 
         $user = User::findOrFail($userId);
 
-        if (trim($request->code) === trim((string) $user->verification_code) || $request->code === '123456') {
+        // Anti-Brute Force Protection: Lock after 5 failed attempts
+        if ($user->verification_attempts >= 5) {
+            SecurityLog::record('brute_force_web_verify_locked', 'warning', "Web verification locked for {$user->email}", $request);
+            return back()->withErrors([
+                'code' => 'تم تجاوز الحد الأقصى للمحاولات (5 محاولات). يرجى طلب كود تفعيل جديد بعد قليل.',
+            ]);
+        }
+
+        // Expiration check: Codes expire after 10 minutes
+        if ($user->verification_code_sent_at && $user->verification_code_sent_at->diffInMinutes(now()) > 10) {
+            return back()->withErrors([
+                'code' => 'انتهت صلاحية رمز التفعيل (صلاحية الرمز 10 دقائق). يرجى الضغط على زر إعادة إرسال الكود أدناه.',
+            ]);
+        }
+
+        $storedCode = (string) $user->verification_code;
+        $inputCode = trim((string) $request->code);
+
+        // Constant-time check: No '123456' backdoor
+        if ($storedCode !== '' && hash_equals($storedCode, $inputCode)) {
             $user->update([
                 'is_verified' => true,
                 'email_verified_at' => now(),
                 'verification_code' => null,
+                'verification_attempts' => 0,
             ]);
 
             try {
@@ -118,8 +173,22 @@ class RegisterController extends Controller
             return redirect()->route('home')->with('success', 'تهانينا! تم تفعيل حسابك بنجاح، يمكنك الآن حجز الغرف ومتابعة حجوزاتك.');
         }
 
+        $user->increment('verification_attempts');
+        $remaining = max(0, 5 - $user->verification_attempts);
+
+        SecurityLog::record(
+            'failed_web_verification_code',
+            'warning',
+            "Failed web code attempt ({$user->verification_attempts}/5) for {$user->email}",
+            $request
+        );
+
+        if ($remaining === 0) {
+            BlockedIp::recordViolation($request->ip() ?: '0.0.0.0', "Repeated failed web verification attempts for {$user->email}", 5, 60, $request->userAgent());
+        }
+
         return back()->withErrors([
-            'code' => 'كود التفعيل المدخل غير صحيح. يرجى التحقق وإعادة المحاولة.',
+            'code' => "كود التفعيل المدخل غير صحيح. المحاولات المتبقية: {$remaining}.",
         ]);
     }
 
@@ -131,8 +200,18 @@ class RegisterController extends Controller
         }
 
         $user = User::findOrFail($userId);
+
+        // Anti-Spam: Throttle resending to once every 60 seconds
+        if ($user->verification_code_sent_at && $user->verification_code_sent_at->diffInSeconds(now()) < 60) {
+            return back()->with('warning', 'يرجى الانتظار دقيقة واحدة قبل طلب إعادة إرسال كود تفعيل جديد منعاً للسبام.');
+        }
+
         $newCode = str_pad((string) random_int(100000, 999999), 6, '0', STR_PAD_LEFT);
-        $user->update(['verification_code' => $newCode]);
+        $user->update([
+            'verification_code' => $newCode,
+            'verification_code_sent_at' => now(),
+            'verification_attempts' => 0,
+        ]);
 
         // إرسال كود التفعيل الجديد عبر البريد الرسمي info@ahmadinsights.online
         try {

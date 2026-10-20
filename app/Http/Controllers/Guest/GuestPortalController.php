@@ -10,6 +10,7 @@ use App\Models\Hotel;
 use App\Models\Message;
 use App\Models\Offer;
 use App\Models\User;
+use App\Services\FileSecurityService;
 use App\Services\NotificationService;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Storage;
@@ -113,7 +114,7 @@ class GuestPortalController extends Controller
         if ($request->hasFile('attachments')) {
             foreach ($request->file('attachments') as $file) {
                 if ($file->isValid()) {
-                    $path = $file->store('guests/attachments', 'public');
+                    $path = FileSecurityService::validateAttachment($file, 8192);
                     $existingAttachments[] = $path;
                 }
             }
@@ -124,7 +125,7 @@ class GuestPortalController extends Controller
             if ($user->avatar) {
                 Storage::disk('public')->delete($user->avatar);
             }
-            $user->avatar = $request->file('avatar')->store('avatars', 'public');
+            $user->avatar = FileSecurityService::validateImage($request->file('avatar'));
         }
 
         $user->name = $fullName;
@@ -220,7 +221,7 @@ class GuestPortalController extends Controller
 
         $attachmentPath = null;
         if ($request->hasFile('attachment') && $request->file('attachment')->isValid()) {
-            $attachmentPath = $request->file('attachment')->store('messages/attachments', 'public');
+            $attachmentPath = FileSecurityService::validateAttachment($request->file('attachment'), 10240);
         }
 
         // Find linked guest record

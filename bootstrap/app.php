@@ -12,14 +12,37 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware) {
-        $middleware->web(append: [
-            \App\Http\Middleware\SetLocale::class,
-        ]);
+        $middleware->web(
+            prepend: [
+                \App\Http\Middleware\CheckBlockedIp::class,
+            ],
+            append: [
+                \App\Http\Middleware\SetLocale::class,
+                \App\Http\Middleware\DetectSqlInjection::class,
+                \App\Http\Middleware\SecurityHeadersMiddleware::class,
+            ]
+        );
+
+        $middleware->api(
+            prepend: [
+                \App\Http\Middleware\CheckBlockedIp::class,
+            ],
+            append: [
+                \App\Http\Middleware\DetectSqlInjection::class,
+                \App\Http\Middleware\PreventApiReplayAttacks::class,
+                \App\Http\Middleware\SecurityHeadersMiddleware::class,
+            ]
+        );
+
         $middleware->alias([
             'hotel_admin' => App\Http\Middleware\HotelAdmin::class,
             'check.hotel' => App\Http\Middleware\CheckHotelAccess::class,
             'role' => App\Http\Middleware\RoleMiddleware::class,
             'hotel.scope' => App\Http\Middleware\EnsureHotelScope::class,
+            'blocked.ip' => App\Http\Middleware\CheckBlockedIp::class,
+            'replay.protect' => App\Http\Middleware\PreventApiReplayAttacks::class,
+            'sql.detect' => App\Http\Middleware\DetectSqlInjection::class,
+            'security.headers' => App\Http\Middleware\SecurityHeadersMiddleware::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions) {
