@@ -755,6 +755,12 @@
                             <span>📱</span> {{ $isEn ? 'Mobile App' : 'تطبيق الجوال' }}
                         </a>
 
+                        @if(Auth::user()->role === 'super_admin')
+                            <a href="{{ route('platform.security.index') }}" class="nav-link-direct text-danger fw-bold">
+                                <span>🛡️</span> {{ $isEn ? 'Security Monitoring' : 'لوحة الأمان والمراقبة' }}
+                            </a>
+                        @endif
+
                         @if(Auth::user()->hasPermission('appearance') || Auth::user()->hasPermission('admins') || Auth::user()->role === 'super_admin')
                             <div class="nav-item dropdown">
                                 <button class="nav-dropdown-btn" type="button" data-bs-toggle="dropdown" aria-expanded="false">
@@ -1423,6 +1429,12 @@
                         <a href="{{ route('platform.admins.index') }}" class="mobile-nav-link">
                             <span class="text-lg">👥</span>
                             <span>{{ $isEn ? 'Platform Admins & Roles' : 'مدراء المنصة والصلاحيات' }}</span>
+                        </a>
+                    @endif
+                    @if(Auth::user()->role === 'super_admin')
+                        <a href="{{ route('platform.security.index') }}" class="mobile-nav-link text-danger font-bold">
+                            <span class="text-lg">🛡️</span>
+                            <span>{{ $isEn ? 'Security Monitoring' : 'لوحة الأمان والمراقبة' }}</span>
                         </a>
                     @endif
 

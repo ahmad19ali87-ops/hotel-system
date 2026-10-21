@@ -70,6 +70,8 @@ class SecurityHardeningTest extends TestCase
             Schema::create('security_logs', function (Blueprint $table) {
                 $table->id();
                 $table->string('ip_address', 45)->index();
+                $table->string('country_code', 10)->nullable()->index();
+                $table->string('country_name', 100)->nullable();
                 $table->unsignedBigInteger('user_id')->nullable();
                 $table->string('event_type', 100);
                 $table->string('severity', 20)->default('warning');
@@ -78,6 +80,32 @@ class SecurityHardeningTest extends TestCase
                 $table->text('user_agent')->nullable();
                 $table->longText('payload')->nullable();
                 $table->text('message')->nullable();
+                $table->timestamps();
+            });
+        }
+
+        if (!Schema::hasTable('site_settings')) {
+            Schema::create('site_settings', function (Blueprint $table) {
+                $table->id();
+                $table->string('key')->unique();
+                $table->text('value')->nullable();
+                $table->string('group')->default('general');
+                $table->timestamps();
+            });
+        }
+
+        if (!Schema::hasTable('app_notifications')) {
+            Schema::create('app_notifications', function (Blueprint $table) {
+                $table->id();
+                $table->unsignedBigInteger('user_id')->nullable();
+                $table->string('title');
+                $table->text('message');
+                $table->string('type')->default('general');
+                $table->string('icon')->default('🔔');
+                $table->string('link')->nullable();
+                $table->unsignedBigInteger('hotel_id')->nullable();
+                $table->text('data')->nullable();
+                $table->boolean('is_read')->default(false);
                 $table->timestamps();
             });
         }
@@ -285,5 +313,138 @@ class SecurityHardeningTest extends TestCase
 
         $res2->assertStatus(409);
         $this->assertStringContainsString('Replay Attack', $res2->json('message'));
+    }
+
+    public function test_super_admin_can_access_security_dashboard_and_see_breakdowns()
+    {
+        $superAdmin = User::create([
+            'name' => 'Super Admin Officer',
+            'email' => 'superadmin@example.com',
+            'password' => Hash::make('password123'),
+            'role' => 'super_admin',
+            'is_verified' => true,
+        ]);
+
+        // Seed some security incidents
+        SecurityLog::create([
+            'ip_address' => '185.220.101.5',
+            'country_code' => 'DE',
+            'country_name' => 'ألمانيا',
+            'event_type' => 'sql_injection_attempt',
+            'severity' => 'critical',
+            'message' => 'Union select attack blocked',
+            'created_at' => now()->subHour(),
+        ]);
+
+        SecurityLog::create([
+            'ip_address' => '185.220.101.5',
+            'country_code' => 'DE',
+            'country_name' => 'ألمانيا',
+            'event_type' => 'malicious_file_upload',
+            'severity' => 'critical',
+            'message' => 'PHP shell upload blocked',
+            'created_at' => now()->subMinutes(30),
+        ]);
+
+        $response = $this->actingAs($superAdmin)->get('/platform/security');
+
+        $response->assertStatus(200);
+        $response->assertSee('لوحة المراقبة والأمان الذكية');
+        $response->assertSee('حقن SQL Injection');
+        $response->assertSee('ألمانيا');
+        $response->assertSee('185.220.101.5');
+    }
+
+    public function test_guest_or_regular_user_cannot_access_security_dashboard()
+    {
+        $guest = User::create([
+            'name' => 'Regular Visitor',
+            'email' => 'visitor@example.com',
+            'password' => Hash::make('password123'),
+            'role' => 'guest',
+            'is_verified' => true,
+        ]);
+
+        $response = $this->actingAs($guest)->get('/platform/security');
+        $response->assertStatus(403);
+    }
+
+    public function test_super_admin_can_manually_block_and_unblock_ip()
+    {
+        $superAdmin = User::create([
+            'name' => 'Security Admin',
+            'email' => 'secadmin@example.com',
+            'password' => Hash::make('password123'),
+            'role' => 'super_admin',
+            'is_verified' => true,
+        ]);
+
+        $targetIp = '203.0.113.88';
+
+        // Block IP
+        $blockRes = $this->actingAs($superAdmin)->post('/platform/security/block', [
+            'ip_address' => $targetIp,
+            'duration' => '24',
+            'reason' => 'حظر أمني يدوي للتجربة',
+        ]);
+
+        $blockRes->assertRedirect();
+        $this->assertTrue(BlockedIp::isBlocked($targetIp));
+
+        // Unblock IP
+        $unblockRes = $this->actingAs($superAdmin)->post('/platform/security/unblock', [
+            'ip_address' => $targetIp,
+        ]);
+
+        $unblockRes->assertRedirect();
+        $this->assertFalse(BlockedIp::isBlocked($targetIp));
+    }
+
+    public function test_super_admin_can_update_security_alert_rules()
+    {
+        $superAdmin = User::create([
+            'name' => 'Rule Manager',
+            'email' => 'rulemanager@example.com',
+            'password' => Hash::make('password123'),
+            'role' => 'super_admin',
+            'is_verified' => true,
+        ]);
+
+        $res = $this->actingAs($superAdmin)->post('/platform/security/settings', [
+            'security_alert_countries' => 'RU,CN,US,IL,IR,TR',
+            'security_alert_threshold' => 3,
+        ]);
+
+        $res->assertRedirect();
+        $this->assertEquals('RU,CN,US,IL,IR,TR', \App\Models\SiteSetting::get('security_alert_countries'));
+        $this->assertEquals('3', \App\Models\SiteSetting::get('security_alert_threshold'));
+    }
+
+    public function test_critical_attack_triggers_instant_alert_notification_to_super_admin()
+    {
+        $superAdmin = User::create([
+            'name' => 'Super Admin Watcher',
+            'email' => 'watcher@example.com',
+            'password' => Hash::make('password123'),
+            'role' => 'super_admin',
+            'is_verified' => true,
+        ]);
+
+        // Record a critical attack
+        SecurityLog::record(
+            'sql_injection_attempt',
+            'critical',
+            'UNION SELECT injection attempt on /api/hotels',
+            null,
+            null
+        );
+
+        // Verify instant notification was created for super admin
+        $notif = \App\Models\AppNotification::where('user_id', $superAdmin->id)
+            ->where('type', 'security_alert')
+            ->first();
+
+        $this->assertNotNull($notif);
+        $this->assertStringContainsString('إنذار أمني فوري', $notif->title);
     }
 }

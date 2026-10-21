@@ -115,6 +115,13 @@ Route::middleware(['auth', 'role:super_admin'])->prefix('platform')->name('platf
     Route::get('/settings', [\App\Http\Controllers\Platform\SiteSettingController::class, 'edit'])->name('settings.edit');
     Route::put('/settings', [\App\Http\Controllers\Platform\SiteSettingController::class, 'update'])->name('settings.update');
     Route::resource('admins', \App\Http\Controllers\Platform\PlatformAdminController::class)->except(['show']);
+
+    // Security Monitoring Dashboard
+    Route::get('/security', [\App\Http\Controllers\Platform\SecurityDashboardController::class, 'index'])->name('security.index');
+    Route::post('/security/block', [\App\Http\Controllers\Platform\SecurityDashboardController::class, 'blockIp'])->name('security.block');
+    Route::post('/security/unblock', [\App\Http\Controllers\Platform\SecurityDashboardController::class, 'unblockIp'])->name('security.unblock');
+    Route::post('/security/settings', [\App\Http\Controllers\Platform\SecurityDashboardController::class, 'updateSettings'])->name('security.settings');
+    Route::post('/security/clear-logs', [\App\Http\Controllers\Platform\SecurityDashboardController::class, 'clearLogs'])->name('security.clear-logs');
 });
 
 // لوحة إدارة تطبيق الجوال (الوجهات والمحافظات، الإعلانات وبنرات أشهر الواجهات)

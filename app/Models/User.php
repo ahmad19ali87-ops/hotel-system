@@ -194,6 +194,10 @@ class User extends Authenticatable
 
     public function unreadNotificationsCount(): int
     {
+        if (!\Illuminate\Support\Facades\Schema::hasTable('app_notifications')) {
+            return 0;
+        }
+
         return $this->unreadNotifications()->count();
     }
 
@@ -204,6 +208,10 @@ class User extends Authenticatable
 
     public function unreadMessagesCount(): int
     {
+        if (!\Illuminate\Support\Facades\Schema::hasTable('messages')) {
+            return 0;
+        }
+
         return \App\Models\Message::where('receiver_id', $this->id)
             ->where('is_read', false)
             ->count();
