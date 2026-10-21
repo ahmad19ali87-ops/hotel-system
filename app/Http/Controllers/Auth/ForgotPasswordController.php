@@ -81,7 +81,8 @@ class ForgotPasswordController extends Controller
             Log::error('Failed to send password reset email: ' . $e->getMessage());
         }
 
-        return back()->with('status', 'تم إرسال رابط وكود استعادة كلمة المرور إلى بريدك الإلكتروني من (info@ahmadinsights.online). يرجى مراجعة صندوق الوارد.');
+        return redirect()->route('password.reset', ['email' => $email])
+            ->with('status', 'تم إرسال كود استعادة كلمة المرور المكون من 6 أرقام إلى بريدك الإلكتروني (' . $email . ') من (info@ahmadinsights.online). يرجى إدخال الكود المستلم أدناه مع كلمة المرور الجديدة.');
     }
 
     /**

@@ -15,8 +15,15 @@
             </div>
 
             <div class="card-body p-4 sm:p-5">
+                @if(session('status'))
+                    <div class="alert alert-success rounded-2xl text-xs font-semibold mb-4 d-flex align-items-center gap-2 shadow-sm border border-success-subtle">
+                        <span class="fs-4">📬</span>
+                        <div>{{ session('status') }}</div>
+                    </div>
+                @endif
+
                 @if($errors->any())
-                    <div class="alert alert-danger rounded-2xl text-xs font-semibold mb-4 d-flex align-items-center gap-2">
+                    <div class="alert alert-danger rounded-2xl text-xs font-semibold mb-4 d-flex align-items-center gap-2 shadow-sm">
                         <span>⚠️</span>
                         <div>{{ $errors->first() }}</div>
                     </div>
@@ -28,12 +35,18 @@
                     @if(!empty($token))
                         <input type="hidden" name="token" value="{{ $token }}">
                     @else
-                        <div class="mb-3">
-                            <label for="token" class="form-label font-bold text-xs text-slate-600 dark:text-slate-300">كود أو رمز الاستعادة (المكون من 6 أرقام) <span class="text-rose-500">*</span></label>
-                            <input id="token" type="text" name="token" class="form-control rounded-xl py-2.5 px-3 text-sm @error('token') is-invalid @enderror" value="{{ old('token') }}" required placeholder="123456">
+                        <div class="mb-3 p-3 rounded-2xl bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-900">
+                            <label for="token" class="form-label font-bold text-xs text-blue-900 dark:text-blue-200 d-flex justify-content-between">
+                                <span>كود التحقق والاستعادة (المكون من 6 أرقام) <span class="text-rose-500">*</span></span>
+                                <span class="text-xs text-muted font-normal">وصلك عبر الإيميل</span>
+                            </label>
+                            <input id="token" type="text" name="token" maxlength="60" class="form-control rounded-xl py-2.5 px-3 text-center text-lg font-monospace tracking-widest fw-bold @error('token') is-invalid @enderror" value="{{ old('token') }}" required autofocus placeholder="123456">
                             @error('token')
                                 <div class="invalid-feedback text-xs font-bold">{{ $message }}</div>
                             @enderror
+                            <div class="form-text text-[11px] text-muted text-center mt-1">
+                                أدخل الكود المستلم من <strong>info@ahmadinsights.online</strong>
+                            </div>
                         </div>
                     @endif
 
@@ -63,9 +76,12 @@
                     </button>
                 </form>
 
-                <div class="text-center mt-4 pt-3 border-top border-slate-100 dark:border-slate-800">
+                <div class="text-center mt-4 pt-3 border-top border-slate-100 dark:border-slate-800 d-flex justify-content-between align-items-center">
                     <a href="{{ route('login') }}" class="text-xs font-bold text-slate-500 hover:text-slate-800 text-decoration-none">
-                        &larr; العودة لصفحة تسجيل الدخول
+                        &larr; العودة لتسجيل الدخول
+                    </a>
+                    <a href="{{ route('password.request') }}" class="text-xs font-bold text-blue-600 dark:text-blue-400 text-decoration-none">
+                        لم يصلك الكود؟ إعادة إرساله 🔄
                     </a>
                 </div>
             </div>

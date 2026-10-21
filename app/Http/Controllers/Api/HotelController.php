@@ -30,9 +30,16 @@ class HotelController extends Controller
             });
         }
 
-        // City / Province filter
+        // City / Province filter (Flexible matching for governorate and city)
         if ($request->filled('province')) {
-            $query->where('province', $request->province);
+            $prov = trim($request->province);
+            $cleanProv = trim(str_replace(['محافظة', 'مدينة', 'منطقة'], '', $prov));
+            $query->where(function ($q) use ($prov, $cleanProv) {
+                $q->where('province', $prov)
+                  ->orWhere('city', $prov)
+                  ->orWhere('province', 'like', "%{$cleanProv}%")
+                  ->orWhere('city', 'like', "%{$cleanProv}%");
+            });
         }
 
         // Amenity filter

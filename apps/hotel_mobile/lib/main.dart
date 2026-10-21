@@ -366,6 +366,7 @@ class ExploreScreen extends StatefulWidget {
 
 class _ExploreScreenState extends State<ExploreScreen> {
   final _searchCtrl = TextEditingController();
+  final _scrollController = ScrollController();
   String _selectedCity = '';
   String _selectedAmenity = '';
   String _sortBy = 'default';
@@ -376,6 +377,30 @@ class _ExploreScreenState extends State<ExploreScreen> {
   List<dynamic> _hotels = [];
   List<dynamic> _destinations = [];
   List<dynamic> _banners = [];
+
+  static const List<String> _syrianProvinces = [
+    'دمشق',
+    'ريف دمشق',
+    'اللاذقية',
+    'طرطوس',
+    'حلب',
+    'حمص',
+    'حماة',
+    'السويداء',
+    'درعا',
+    'القنيطرة',
+    'دير الزور',
+    'الحسكة',
+    'الرقة',
+    'إدلب',
+  ];
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    _scrollController.dispose();
+    super.dispose();
+  }
 
   @override
   void initState() {
@@ -484,6 +509,145 @@ class _ExploreScreenState extends State<ExploreScreen> {
       });
       _fetchHotels();
     }
+  }
+
+  void _selectProvince(String prov) {
+    setState(() {
+      if (_selectedCity == prov) {
+        _selectedCity = '';
+      } else {
+        _selectedCity = prov;
+      }
+    });
+    _fetchHotels();
+    if (_selectedCity.isNotEmpty && _scrollController.hasClients) {
+      Future.delayed(const Duration(milliseconds: 150), () {
+        if (_scrollController.hasClients) {
+          _scrollController.animateTo(
+            490.0,
+            duration: const Duration(milliseconds: 400),
+            curve: Curves.easeOutCubic,
+          );
+        }
+      });
+    }
+  }
+
+  void _openProvinceSelector() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: Container(
+          height: MediaQuery.of(context).size.height * 0.75,
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+          ),
+          child: Column(
+            children: [
+              Container(
+                margin: const EdgeInsets.only(top: 10, bottom: 8),
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade300,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Row(
+                      children: [
+                        Icon(Icons.location_city, color: Color(0xFF003580)),
+                        SizedBox(width: 8),
+                        Text(
+                          'تحديد المحافظة والوجهة',
+                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
+                        ),
+                      ],
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close),
+                      onPressed: () => Navigator.pop(ctx),
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(height: 1),
+              ListTile(
+                leading: CircleAvatar(
+                  backgroundColor: _selectedCity.isEmpty ? const Color(0xFF003580) : const Color(0xFFF1F5F9),
+                  child: Icon(
+                    Icons.map,
+                    color: _selectedCity.isEmpty ? Colors.white : const Color(0xFF003580),
+                    size: 20,
+                  ),
+                ),
+                title: const Text('جميع المحافظات السورية', style: TextStyle(fontWeight: FontWeight.bold)),
+                subtitle: const Text('عرض جميع الفنادق والمنتجعات دون تصفية', style: TextStyle(fontSize: 11)),
+                trailing: _selectedCity.isEmpty
+                    ? const Icon(Icons.check_circle, color: Color(0xFF003580))
+                    : null,
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _selectProvince('');
+                },
+              ),
+              const Divider(height: 1),
+              Expanded(
+                child: ListView.separated(
+                  itemCount: _syrianProvinces.length,
+                  separatorBuilder: (c, i) => const Divider(height: 1, indent: 64),
+                  itemBuilder: (ctx, idx) {
+                    final prov = _syrianProvinces[idx];
+                    final isSel = _selectedCity == prov;
+                    final dest = _destinations.firstWhere(
+                      (d) => d['name'] == prov,
+                      orElse: () => null,
+                    );
+                    final count = dest != null ? (dest['count'] ?? 0) : null;
+
+                    return ListTile(
+                      leading: CircleAvatar(
+                        backgroundColor: isSel ? const Color(0xFF003580) : const Color(0xFFF1F5F9),
+                        child: Text(
+                          prov.characters.take(1).toString(),
+                          style: TextStyle(
+                            color: isSel ? Colors.white : const Color(0xFF003580),
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                      title: Text(
+                        'محافظة $prov',
+                        style: TextStyle(
+                          fontWeight: isSel ? FontWeight.bold : FontWeight.w500,
+                          color: isSel ? const Color(0xFF003580) : const Color(0xFF0F172A),
+                        ),
+                      ),
+                      subtitle: count != null ? Text('$count أماكن إقامة متوفرة', style: const TextStyle(fontSize: 11)) : null,
+                      trailing: isSel
+                          ? const Icon(Icons.check_circle, color: Color(0xFF003580))
+                          : const Icon(Icons.arrow_back_ios_new, size: 14, color: Colors.grey),
+                      onTap: () {
+                        Navigator.pop(ctx);
+                        _selectProvince(prov);
+                      },
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   void _openComplaintsSheet() {
@@ -984,6 +1148,7 @@ class _ExploreScreenState extends State<ExploreScreen> {
   @override
   Widget build(BuildContext context) {
     return CustomScrollView(
+      controller: _scrollController,
       slivers: [
         // Booking.com Navy Header & Top Actions
         SliverAppBar(
@@ -1096,6 +1261,64 @@ class _ExploreScreenState extends State<ExploreScreen> {
                 ),
                 const SizedBox(height: 8),
 
+                // Province Filter Card (فلتر تحديد المحافظة والوجهة)
+                Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(10),
+                    onTap: _openProvinceSelector,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: _selectedCity.isNotEmpty ? const Color(0xFFFEBB02) : const Color(0xFFCBD5E1),
+                          width: _selectedCity.isNotEmpty ? 2 : 1,
+                        ),
+                        boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 4)],
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.location_city_rounded,
+                            color: _selectedCity.isNotEmpty ? const Color(0xFF003580) : const Color(0xFF64748B),
+                            size: 22,
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text('المحافظة والوجهة السياحية (فلتر المحافظة):', style: TextStyle(fontSize: 10, color: Colors.grey)),
+                                Text(
+                                  _selectedCity.isNotEmpty ? 'محافظة $_selectedCity' : 'جميع المحافظات السورية (اضغط للتحديد)',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: _selectedCity.isNotEmpty ? FontWeight.bold : FontWeight.w500,
+                                    color: _selectedCity.isNotEmpty ? const Color(0xFF003580) : const Color(0xFF334155),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          if (_selectedCity.isNotEmpty)
+                            IconButton(
+                              icon: const Icon(Icons.cancel, size: 18, color: Colors.red),
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(),
+                              tooltip: 'إلغاء فلتر المحافظة',
+                              onPressed: () => _selectProvince(''),
+                            )
+                          else
+                            const Icon(Icons.keyboard_arrow_down, color: Color(0xFF003580), size: 22),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+
                 // Booking Date Filter Card (فلتر تاريخ الحجز)
                 Material(
                   color: Colors.transparent,
@@ -1170,6 +1393,19 @@ class _ExploreScreenState extends State<ExploreScreen> {
               scrollDirection: Axis.horizontal,
               child: Row(
                 children: [
+                  if (_selectedCity.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(left: 6),
+                      child: InputChip(
+                        avatar: const Icon(Icons.location_on, size: 16, color: Color(0xFF003580)),
+                        label: Text(
+                          '📍 محافظة $_selectedCity',
+                          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF003580)),
+                        ),
+                        backgroundColor: const Color(0xFFFEBB02).withValues(alpha: 0.25),
+                        onDeleted: () => _selectProvince(''),
+                      ),
+                    ),
                   if (_checkInDate != null)
                     Padding(
                       padding: const EdgeInsets.only(left: 6),
@@ -1240,7 +1476,7 @@ class _ExploreScreenState extends State<ExploreScreen> {
           ),
           SliverToBoxAdapter(
             child: SizedBox(
-              height: 120,
+              height: 125,
               child: ListView.builder(
                 padding: const EdgeInsets.symmetric(horizontal: 12),
                 scrollDirection: Axis.horizontal,
@@ -1249,43 +1485,89 @@ class _ExploreScreenState extends State<ExploreScreen> {
                   final d = _destinations[idx];
                   final isSelected = _selectedCity == d['name'];
                   return GestureDetector(
-                    onTap: () {
-                      setState(() {
-                        _selectedCity = isSelected ? '' : d['name'];
-                      });
-                      _fetchHotels();
-                    },
-                    child: Container(
-                      width: 140,
-                      margin: const EdgeInsets.symmetric(horizontal: 4),
+                    onTap: () => _selectProvince(d['name'] ?? ''),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 250),
+                      width: 145,
+                      margin: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
                       decoration: BoxDecoration(
                         borderRadius: BorderRadius.circular(14),
                         border: Border.all(
                           color: isSelected ? const Color(0xFFFEBB02) : Colors.transparent,
-                          width: 2,
+                          width: isSelected ? 3 : 1,
                         ),
+                        boxShadow: isSelected
+                            ? [
+                                BoxShadow(
+                                  color: const Color(0xFFFEBB02).withValues(alpha: 0.5),
+                                  blurRadius: 8,
+                                  spreadRadius: 1,
+                                )
+                              ]
+                            : [
+                                const BoxShadow(
+                                  color: Colors.black12,
+                                  blurRadius: 4,
+                                  offset: Offset(0, 2),
+                                )
+                              ],
                         image: DecorationImage(
                           image: NetworkImage(d['image'] ?? 'https://images.unsplash.com/photo-1578895101408-1a36b834405b?w=600'),
                           fit: BoxFit.cover,
-                          colorFilter: ColorFilter.mode(Colors.black.withValues(alpha: 0.35), BlendMode.darken),
+                          colorFilter: ColorFilter.mode(
+                            isSelected ? Colors.black.withValues(alpha: 0.2) : Colors.black.withValues(alpha: 0.38),
+                            BlendMode.darken,
+                          ),
                         ),
                       ),
-                      child: Padding(
-                        padding: const EdgeInsets.all(10),
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.end,
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              d['name'] ?? '',
-                              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                      child: Stack(
+                        children: [
+                          if (isSelected)
+                            Positioned(
+                              top: 8,
+                              right: 8,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFFEBB02),
+                                  borderRadius: BorderRadius.circular(12),
+                                  boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4)],
+                                ),
+                                child: const Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(Icons.check, size: 12, color: Color(0xFF003580)),
+                                    SizedBox(width: 3),
+                                    Text(
+                                      'محددة',
+                                      style: TextStyle(
+                                        color: Color(0xFF003580),
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 10,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
                             ),
-                            Text(
-                              '${d['count'] ?? 0} فندق متوفر',
-                              style: const TextStyle(color: Colors.white70, fontSize: 10),
+                          Padding(
+                            padding: const EdgeInsets.all(10),
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.end,
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  d['name'] ?? '',
+                                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                                ),
+                                Text(
+                                  '${d['count'] ?? 0} فندق متوفر',
+                                  style: const TextStyle(color: Colors.white70, fontSize: 10),
+                                ),
+                              ],
                             ),
-                          ],
-                        ),
+                          ),
+                        ],
                       ),
                     ),
                   );
@@ -1324,10 +1606,7 @@ class _ExploreScreenState extends State<ExploreScreen> {
                   return GestureDetector(
                     onTap: () {
                       if (b['link_type'] == 'destination' && b['link_value'] != null) {
-                        setState(() {
-                          _selectedCity = b['link_value'].toString();
-                        });
-                        _fetchHotels();
+                        _selectProvince(b['link_value'].toString());
                       } else if (b['link_type'] == 'hotel' && b['link_value'] != null) {
                         final hotelId = int.tryParse(b['link_value'].toString());
                         if (hotelId != null) {
@@ -1447,9 +1726,29 @@ class _ExploreScreenState extends State<ExploreScreen> {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(
-                  _selectedCity.isEmpty ? 'جميع الفنادق والمنتجعات' : 'فنادق $_selectedCity',
-                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
+                Expanded(
+                  child: Row(
+                    children: [
+                      Text(
+                        _selectedCity.isEmpty ? 'جميع الفنادق والمنتجعات' : 'فنادق محافظة $_selectedCity',
+                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
+                      ),
+                      if (_selectedCity.isNotEmpty) ...[
+                        const SizedBox(width: 8),
+                        InkWell(
+                          onTap: () => _selectProvince(''),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFFEE2E2),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: const Text('إلغاء الفلتر ✕', style: TextStyle(fontSize: 10, color: Colors.red, fontWeight: FontWeight.bold)),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
                 ),
                 Text('${_hotels.length} مكان إقامة', style: const TextStyle(fontSize: 12, color: Colors.grey)),
               ],
@@ -1463,15 +1762,39 @@ class _ExploreScreenState extends State<ExploreScreen> {
             child: Center(child: CircularProgressIndicator()),
           )
         else if (_hotels.isEmpty)
-          const SliverFillRemaining(
+          SliverFillRemaining(
+            hasScrollBody: false,
             child: Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.hotel_outlined, size: 64, color: Colors.grey),
-                  SizedBox(height: 12),
-                  Text('لا توجد فنادق تطابق معايير البحث الحالية.', style: TextStyle(color: Colors.grey, fontSize: 14)),
-                ],
+              child: Padding(
+                padding: const EdgeInsets.all(24.0),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(Icons.hotel_outlined, size: 64, color: Colors.grey),
+                    const SizedBox(height: 12),
+                    Text(
+                      _selectedCity.isNotEmpty
+                          ? 'لا توجد فنادق متاحة حالياً في محافظة $_selectedCity.'
+                          : 'لا توجد فنادق تطابق معايير البحث الحالية.',
+                      style: const TextStyle(color: Colors.grey, fontSize: 14),
+                      textAlign: TextAlign.center,
+                    ),
+                    if (_selectedCity.isNotEmpty) ...[
+                      const SizedBox(height: 14),
+                      ElevatedButton.icon(
+                        onPressed: () => _selectProvince(''),
+                        icon: const Icon(Icons.clear_all, size: 16),
+                        label: const Text('عرض جميع المحافظات'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF003580),
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
               ),
             ),
           )

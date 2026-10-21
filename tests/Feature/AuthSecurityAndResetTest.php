@@ -20,8 +20,47 @@ class AuthSecurityAndResetTest extends TestCase
             $table->id();
             $table->string('name')->default('فندق النخبة');
             $table->string('slug')->default('elite-hotel');
+            $table->string('city')->nullable();
+            $table->string('province')->nullable();
+            $table->string('address')->nullable();
+            $table->string('phone')->nullable();
+            $table->string('email')->nullable();
+            $table->string('status')->default('active');
             $table->unsignedTinyInteger('stars')->default(5);
             $table->boolean('is_visible')->default(true);
+            $table->timestamps();
+            $table->softDeletes();
+        });
+
+        Schema::create('destinations', function (Blueprint $table) {
+            $table->id();
+            $table->string('title', 150);
+            $table->string('subtitle', 255)->nullable();
+            $table->string('image', 255)->nullable();
+            $table->string('link', 255)->nullable();
+            $table->string('icon', 50)->nullable()->default('🏛️');
+            $table->integer('sort_order')->default(0);
+            $table->boolean('is_active')->default(true);
+            $table->timestamps();
+        });
+
+        Schema::create('rooms', function (Blueprint $table) {
+            $table->id();
+            $table->foreignId('hotel_id');
+            $table->string('room_number')->default('101');
+            $table->string('type')->default('single');
+            $table->decimal('price_per_night', 10, 2)->default(100);
+            $table->string('status')->default('available');
+            $table->timestamps();
+        });
+
+        Schema::create('hotel_reviews', function (Blueprint $table) {
+            $table->id();
+            $table->foreignId('hotel_id');
+            $table->foreignId('user_id')->nullable();
+            $table->unsignedTinyInteger('rating')->default(5);
+            $table->text('comment')->nullable();
+            $table->boolean('is_approved')->default(true);
             $table->timestamps();
         });
 
@@ -203,6 +242,59 @@ class AuthSecurityAndResetTest extends TestCase
         $targetUrl = $response->headers->get('Location');
         $this->assertStringContainsString('accounts.google.com', $targetUrl);
         $this->assertStringContainsString('467934742059-hnkanpf5954jqgtu18aubhqpj780et00.apps.googleusercontent.com', $targetUrl);
+    }
+
+    public function test_hotels_province_filtering_and_destinations_api(): void
+    {
+        DB::table('destinations')->insert([
+            'title' => 'محافظة دمشق',
+            'subtitle' => 'عاصمة الياسمين',
+            'image' => '/images/damascus.jpg',
+            'link' => '/hotels?province=' . urlencode('دمشق'),
+            'sort_order' => 1,
+            'is_active' => true,
+        ]);
+
+        \App\Models\Hotel::create([
+            'name' => 'فندق دمشق الدولي',
+            'city' => 'دمشق القديمة',
+            'province' => 'دمشق',
+            'address' => 'شارع الثورة',
+            'phone' => '011111111',
+            'email' => 'damascus@hotel.com',
+            'status' => 'active',
+            'is_visible' => true,
+        ]);
+
+        \App\Models\Hotel::create([
+            'name' => 'فندق شاطئ اللاذقية',
+            'city' => 'اللاذقية',
+            'province' => 'اللاذقية',
+            'address' => 'الكورنيش الجنوبي',
+            'phone' => '041111111',
+            'email' => 'lattakia@hotel.com',
+            'status' => 'active',
+            'is_visible' => true,
+        ]);
+
+        // Test destinations API
+        $destRes = $this->getJson('/api/destinations');
+        $destRes->assertStatus(200)
+                ->assertJsonStructure(['status', 'data' => [['name', 'count', 'image']]]);
+
+        // Test filtering by province "دمشق"
+        $filterDamascus = $this->getJson('/api/hotels?province=' . urlencode('دمشق'));
+        $filterDamascus->assertStatus(200);
+        $dataDamascus = $filterDamascus->json('data.data');
+        $this->assertTrue(collect($dataDamascus)->contains('name', 'فندق دمشق الدولي'));
+        $this->assertFalse(collect($dataDamascus)->contains('name', 'فندق شاطئ اللاذقية'));
+
+        // Test filtering by province "اللاذقية"
+        $filterLattakia = $this->getJson('/api/hotels?province=' . urlencode('اللاذقية'));
+        $filterLattakia->assertStatus(200);
+        $dataLattakia = $filterLattakia->json('data.data');
+        $this->assertTrue(collect($dataLattakia)->contains('name', 'فندق شاطئ اللاذقية'));
+        $this->assertFalse(collect($dataLattakia)->contains('name', 'فندق دمشق الدولي'));
     }
 }
 

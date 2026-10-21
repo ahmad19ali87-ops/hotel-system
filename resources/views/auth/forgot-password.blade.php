@@ -49,6 +49,12 @@
                     </button>
                 </form>
 
+                <div class="mt-3 text-center">
+                    <a href="{{ route('password.reset') }}" class="text-xs font-bold text-indigo-600 dark:text-indigo-400 text-decoration-none">
+                        وصلك كود الاستعادة بالفعل؟ أدخل الكود هنا 🔐
+                    </a>
+                </div>
+
                 <div class="text-center mt-4 pt-3 border-top border-slate-100 dark:border-slate-800 d-flex justify-content-between align-items-center">
                     <a href="{{ route('login') }}" class="text-xs font-bold text-blue-600 dark:text-blue-400 text-decoration-none">
                         &larr; العودة لتسجيل الدخول
