@@ -22,6 +22,7 @@ class SecurityLog extends Model
         'user_id',
         'event_type',
         'severity',
+        'action_taken',
         'method',
         'url',
         'user_agent',
@@ -66,7 +67,9 @@ class SecurityLog extends Model
             return null;
         }
 
-        $log = static::create([
+        $actionTaken = $extraPayload['action_taken'] ?? null;
+
+        $logData = [
             'ip_address' => $ip,
             'country_code' => $countryCode,
             'country_name' => $countryName,
@@ -78,10 +81,21 @@ class SecurityLog extends Model
             'user_agent' => $userAgent ? substr($userAgent, 0, 500) : null,
             'payload' => $sanitizedPayload,
             'message' => $message,
-        ]);
+        ];
+
+        if (Schema::hasColumn('security_logs', 'action_taken')) {
+            $logData['action_taken'] = $actionTaken;
+        }
+
+        $log = static::create($logData);
 
         // Evaluate Instant Alerts
         static::evaluateInstantAlerts($eventType, $severity, $ip, $countryCode, $countryName, $message);
+
+        // Auto-enforce watched country policy if critical attack detected
+        if ($severity === 'critical' && !in_array($eventType, ['blocked_ip_access_attempt', 'watched_country_attack'], true)) {
+            \App\Services\ThreatAutoResponseEngine::inspectAndEnforceWatchedCountry($ip, $eventType, $request);
+        }
 
         return $log;
     }

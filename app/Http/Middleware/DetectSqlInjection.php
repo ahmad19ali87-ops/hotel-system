@@ -4,6 +4,7 @@ namespace App\Http\Middleware;
 
 use App\Models\BlockedIp;
 use App\Models\SecurityLog;
+use App\Services\ThreatAutoResponseEngine;
 use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -37,26 +38,28 @@ class DetectSqlInjection
         if ($this->hasSqlInjection($inputs) || $this->hasSqlInjection($request->query())) {
             $ip = $request->ip() ?: '0.0.0.0';
 
+            // Rule 1: SQL Injection -> Immediate IP Ban via Threat Auto-Response Engine
+            ThreatAutoResponseEngine::handleSqlInjection($ip, "Pattern detected on {$request->fullUrl()}", $request);
+
             SecurityLog::record(
                 'sql_injection_attempt',
                 'critical',
                 "Malicious SQL injection pattern detected on {$request->fullUrl()}",
-                $request
+                $request,
+                null,
+                ['action_taken' => 'ip_blocked_immediately']
             );
-
-            // Record violation: 2 attempts trigger automatic IP block for 24 hours
-            BlockedIp::recordViolation($ip, 'SQL Injection attempt detected', 2, 1440, $request->userAgent());
 
             if ($request->expectsJson() || $request->is('api/*')) {
                 return response()->json([
                     'status' => 'error',
                     'code' => 403,
-                    'message' => 'تم رفض الطلب: تم اكتشاف محتوى غير آمن أو غير مصرح به (SQL Injection Protection).',
+                    'message' => 'تم رفض الطلب: تم اكتشاف محتوى غير آمن أو غير مصرح به (SQL Injection Protection). تم حظر الـ IP تلقائياً.',
                 ], 403);
             }
 
             return response()->view('errors.403', [
-                'message' => 'تم رفض الطلب لاكتشاف محتوى غير آمن ومحاولات حقن غير مصرح بها.',
+                'message' => 'تم رفض الطلب لاكتشاف محتوى غير آمن ومحاولات حقن غير مصرح بها. تم حظر هذا الجهاز فوراً.',
             ], 403);
         }
 

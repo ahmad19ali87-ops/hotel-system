@@ -324,6 +324,247 @@
         </div>
     </div>
 
+    {{-- Threat Auto-Response Engine Card (محرك الاستجابة التلقائي للهجمات) --}}
+    <div class="card border-0 shadow-sm rounded-4 mb-4 overflow-hidden border-2 border-danger-subtle bg-white dark:bg-slate-800">
+        <div class="card-body p-4 text-white" style="background: linear-gradient(135deg, #180d2b 0%, #29081e 50%, #0f172a 100%);">
+            <div class="d-flex flex-wrap justify-content-between align-items-center gap-3">
+                <div class="d-flex align-items-center gap-3">
+                    <div class="p-3 bg-red-500/20 rounded-3 border border-red-500/30 text-white fs-3">
+                        ⚡
+                    </div>
+                    <div>
+                        <div class="d-flex align-items-center gap-2 mb-1 flex-wrap">
+                            <h4 class="fw-bold mb-0 text-white">محرك الاستجابة التلقائي للهجمات (Threat Auto-Response Engine)</h4>
+                            @if($threatEngineSummary['enabled'])
+                                <span class="badge bg-success text-white border border-success px-2.5 py-1 text-xs fw-bold">
+                                    ● نشط ويعمل بالوضع التلقائي
+                                </span>
+                            @else
+                                <span class="badge bg-secondary text-white px-2.5 py-1 text-xs fw-bold">
+                                    معطل
+                                </span>
+                            @endif
+                        </div>
+                        <p class="text-white-50 mb-0 small">
+                            تنفيذ ردود أمنية رادعة وفورية عند رصد أي هجوم لحماية النظام والخوادم تلقائياً وبدون تدخل بشري
+                        </p>
+                    </div>
+                </div>
+                <div>
+                    <span class="badge bg-white/10 text-white px-3 py-2 rounded-pill font-monospace text-xs border border-white/20">
+                        {{ $threatEngineSummary['active_rules_count'] }} من أصل {{ $threatEngineSummary['total_rules_count'] }} قواعد استجابة مفعلة
+                    </span>
+                </div>
+            </div>
+        </div>
+        <div class="card-body p-4">
+            <form action="{{ route('platform.security.threat-engine') }}" method="POST">
+                @csrf
+                <div class="d-flex justify-content-between align-items-center pb-3 mb-4 border-bottom">
+                    <div>
+                        <div class="fw-bold text-slate-800 dark:text-slate-100">التشغيل الشامل لمحرك الاستجابة الذكي</div>
+                        <span class="text-xs text-muted">تفعيل أو إيقاف الاستجابة التلقائية لجميع القواعد دفعة واحدة</span>
+                    </div>
+                    <div class="form-check form-switch fs-4 m-0">
+                        <input class="form-check-input" type="checkbox" name="threat_engine_enabled" value="1" id="threat_engine_enabled" {{ $threatEngineSummary['enabled'] ? 'checked' : '' }}>
+                    </div>
+                </div>
+
+                <div class="row g-3">
+                    {{-- Rule 1: SQL Injection --}}
+                    <div class="col-12 col-md-6 col-xl-4">
+                        <div class="p-3 rounded-4 border border-danger-subtle bg-danger-subtle/10 h-100 d-flex flex-column justify-content-between">
+                            <div>
+                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                    <span class="fw-bold text-danger text-sm d-flex align-items-center gap-1.5">
+                                        <span>💉</span> هجمات SQL Injection
+                                    </span>
+                                    <div class="form-check form-switch m-0">
+                                        <input class="form-check-input" type="checkbox" name="threat_rule_sqli" value="1" {{ \App\Models\SiteSetting::get('threat_rule_sqli', '1') !== '0' ? 'checked' : '' }}>
+                                    </div>
+                                </div>
+                                <div class="text-xs text-slate-700 dark:text-slate-300 mb-2">
+                                    حظر عنوان IP المهاجم فوراً وبشكل دائم ومنعه من إجراء أي طلبات أخرى إلى الخادم.
+                                </div>
+                            </div>
+                            <div class="pt-2 border-top border-danger-subtle/50 d-flex justify-content-between align-items-center">
+                                <span class="text-[11px] text-muted">الاستجابة التلقائية:</span>
+                                <span class="badge bg-danger text-white rounded-pill px-2.5 py-1 text-[11px] fw-bold">حظر IP فوري دائم 🚫</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    {{-- Rule 2: Malicious File Upload --}}
+                    <div class="col-12 col-md-6 col-xl-4">
+                        <div class="p-3 rounded-4 border border-danger-subtle bg-danger-subtle/10 h-100 d-flex flex-column justify-content-between">
+                            <div>
+                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                    <span class="fw-bold text-danger text-sm d-flex align-items-center gap-1.5">
+                                        <span>☣️</span> رفع ملف ضار (PHP, EXE, JS)
+                                    </span>
+                                    <div class="form-check form-switch m-0">
+                                        <input class="form-check-input" type="checkbox" name="threat_rule_file" value="1" {{ \App\Models\SiteSetting::get('threat_rule_file', '1') !== '0' ? 'checked' : '' }}>
+                                    </div>
+                                </div>
+                                <div class="text-xs text-slate-700 dark:text-slate-300 mb-2">
+                                    حظر IP الفاعل فوراً لمدة 24 ساعة وإطلاق إنذار طوارئ أمني فوري للمسؤولين.
+                                </div>
+                            </div>
+                            <div class="pt-2 border-top border-danger-subtle/50 d-flex justify-content-between align-items-center">
+                                <span class="text-[11px] text-muted">الاستجابة التلقائية:</span>
+                                <span class="badge bg-danger text-white rounded-pill px-2.5 py-1 text-[11px] fw-bold">حظر 24h + إنذار عاجل 🚨</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    {{-- Rule 3: Watched Country Attack --}}
+                    <div class="col-12 col-md-6 col-xl-4">
+                        <div class="p-3 rounded-4 border border-warning-subtle bg-warning-subtle/10 h-100 d-flex flex-column justify-content-between">
+                            <div>
+                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                    <span class="fw-bold text-warning-emphasis text-sm d-flex align-items-center gap-1.5">
+                                        <span>🌐</span> هجوم من دولة مراقبة
+                                    </span>
+                                    <div class="form-check form-switch m-0">
+                                        <input class="form-check-input" type="checkbox" name="threat_rule_country" value="1" {{ \App\Models\SiteSetting::get('threat_rule_country', '1') !== '0' ? 'checked' : '' }}>
+                                    </div>
+                                </div>
+                                <div class="text-xs text-slate-700 dark:text-slate-300 mb-2">
+                                    أي هجوم من قائمة الدول المحددة تحت المراقبة يتم حظر عنوان الـ IP الخاص به تلقائياً 24 ساعة.
+                                </div>
+                            </div>
+                            <div class="pt-2 border-top border-warning-subtle/50 d-flex justify-content-between align-items-center">
+                                <span class="text-[11px] text-muted">الاستجابة التلقائية:</span>
+                                <span class="badge bg-warning text-dark rounded-pill px-2.5 py-1 text-[11px] fw-bold">حظر IP لمدة 24 ساعة 🕒</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    {{-- Rule 4: Brute Force --}}
+                    <div class="col-12 col-md-6 col-xl-4">
+                        <div class="p-3 rounded-4 border border-warning-subtle bg-warning-subtle/10 h-100 d-flex flex-column justify-content-between">
+                            <div>
+                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                    <span class="fw-bold text-warning-emphasis text-sm d-flex align-items-center gap-1.5">
+                                        <span>🔒</span> هجوم التخمين (Brute Force)
+                                    </span>
+                                    <div class="form-check form-switch m-0">
+                                        <input class="form-check-input" type="checkbox" name="threat_rule_bruteforce" value="1" {{ \App\Models\SiteSetting::get('threat_rule_bruteforce', '1') !== '0' ? 'checked' : '' }}>
+                                    </div>
+                                </div>
+                                <div class="text-xs text-slate-700 dark:text-slate-300 mb-2">
+                                    عند تكرار محاولات الدخول الخاطئة (5 محاولات)، يتم قفل الحساب فوراً لمدة ساعة لمنع الاختراق.
+                                </div>
+                            </div>
+                            <div class="pt-2 border-top border-warning-subtle/50 d-flex justify-content-between align-items-center">
+                                <span class="text-[11px] text-muted">الاستجابة التلقائية:</span>
+                                <span class="badge bg-warning text-dark rounded-pill px-2.5 py-1 text-[11px] fw-bold">قفل الحساب لمدة ساعة ⏱️</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    {{-- Rule 5: Replay Attack --}}
+                    <div class="col-12 col-md-6 col-xl-4">
+                        <div class="p-3 rounded-4 border border-danger-subtle bg-danger-subtle/10 h-100 d-flex flex-column justify-content-between">
+                            <div>
+                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                    <span class="fw-bold text-danger text-sm d-flex align-items-center gap-1.5">
+                                        <span>⚡</span> هجوم Replay (إعادة الإرسال)
+                                    </span>
+                                    <div class="form-check form-switch m-0">
+                                        <input class="form-check-input" type="checkbox" name="threat_rule_replay" value="1" {{ \App\Models\SiteSetting::get('threat_rule_replay', '1') !== '0' ? 'checked' : '' }}>
+                                    </div>
+                                </div>
+                                <div class="text-xs text-slate-700 dark:text-slate-300 mb-2">
+                                    حظر الجلسة بالكامل وإلغاء صلاحية التوكن والـ Bearer فوراً ومنع أي استخدام لاحق له.
+                                </div>
+                            </div>
+                            <div class="pt-2 border-top border-danger-subtle/50 d-flex justify-content-between align-items-center">
+                                <span class="text-[11px] text-muted">الاستجابة التلقائية:</span>
+                                <span class="badge bg-danger text-white rounded-pill px-2.5 py-1 text-[11px] fw-bold">حظر الجلسة بالكامل 🛑</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    {{-- Summary / Save Action Box --}}
+                    <div class="col-12 col-md-6 col-xl-4">
+                        <div class="p-3 rounded-4 border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50 h-100 d-flex flex-column justify-content-between">
+                            <div>
+                                <div class="fw-bold text-slate-800 dark:text-slate-200 text-sm mb-1">
+                                    تحديث قواعد المحرك
+                                </div>
+                                <div class="text-xs text-muted mb-3">
+                                    يمكنك تفعيل أو استثناء أي قاعدة من القواعد الخمس حسب السياسة الأمنية للمنشأة.
+                                </div>
+                            </div>
+                            <button type="submit" class="btn btn-danger rounded-3 btn-sm w-100 fw-bold shadow-sm py-2">
+                                حفظ وتطبيق إعدادات المحرك ⚡
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    {{-- Locked Accounts by Anti-Brute Force Card --}}
+    @if($lockedUsers->isNotEmpty())
+        <div class="card border-0 shadow-sm rounded-4 mb-4 border-2 border-warning bg-white dark:bg-slate-800">
+            <div class="card-header bg-transparent border-0 pt-4 px-4 pb-2 d-flex justify-content-between align-items-center">
+                <h5 class="fw-bold mb-0 text-slate-800 dark:text-slate-100 d-flex align-items-center gap-2">
+                    <span>🔒</span> الحسابات المقفلة مؤقتاً بسبب هجمات التخمين Brute Force ({{ $lockedUsers->count() }})
+                </h5>
+                <span class="badge bg-warning text-dark rounded-pill text-xs fw-bold">قفل أمني نشط (1 ساعة)</span>
+            </div>
+            <div class="card-body p-4 pt-2">
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0">
+                        <thead class="table-light text-xs text-muted">
+                            <tr>
+                                <th>المستخدم</th>
+                                <th>البريد الإلكتروني</th>
+                                <th>الدور</th>
+                                <th>تاريخ انتهاء القفل</th>
+                                <th>الوقت المتبقي</th>
+                                <th class="text-end">إجراء الإدارة</th>
+                            </tr>
+                        </thead>
+                        <tbody class="text-sm">
+                            @foreach($lockedUsers as $lUser)
+                                <tr>
+                                    <td>
+                                        <div class="d-flex align-items-center gap-2">
+                                            <img src="{{ $lUser->avatar_url }}" class="rounded-circle" width="32" height="32" alt="avatar">
+                                            <span class="fw-bold text-slate-800 dark:text-slate-200">{{ $lUser->name }}</span>
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <span class="font-monospace text-xs">{{ $lUser->email }}</span>
+                                    </td>
+                                    <td>
+                                        <span class="badge bg-secondary-subtle text-secondary text-xs">{{ $lUser->role }}</span>
+                                    </td>
+                                    <td class="text-xs font-monospace">{{ $lUser->locked_until?->format('Y-m-d H:i:s') }}</td>
+                                    <td class="text-xs">
+                                        <span class="text-warning fw-bold">{{ $lUser->locked_until?->diffForHumans() }}</span>
+                                    </td>
+                                    <td class="text-end">
+                                        <form action="{{ route('platform.security.unlock-user', $lUser->id) }}" method="POST" class="d-inline">
+                                            @csrf
+                                            <button type="submit" class="btn btn-outline-success btn-xs rounded-pill px-3 py-1 text-xs fw-bold">
+                                                إلغاء القفل فوراً (Unlock) 🔓
+                                            </button>
+                                        </form>
+                                    </td>
+                                </tr>
+                            @endforeach
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    @endif
+
     {{-- Settings & Manual Actions Row --}}
     <div class="row g-4 mb-4">
         {{-- Instant Alert Settings Card --}}
@@ -565,9 +806,14 @@
                                         </div>
                                     </td>
                                     <td>
-                                        <span class="badge bg-slate-100 dark:bg-slate-700 text-slate-800 dark:text-slate-200 font-monospace text-[11px] px-2 py-1">
+                                        <span class="badge bg-slate-100 dark:bg-slate-700 text-slate-800 dark:text-slate-200 font-monospace text-[11px] px-2 py-1 d-block mb-1">
                                             {{ $log->event_type }}
                                         </span>
+                                        @if($log->action_taken)
+                                            <span class="badge bg-danger-subtle text-danger border border-danger-subtle font-monospace text-[10px] px-2 py-0.5">
+                                                ⚡ {{ $log->action_taken }}
+                                            </span>
+                                        @endif
                                     </td>
                                     <td>
                                         @if($log->severity === 'critical')
@@ -625,3 +871,4 @@
     </div>
 </div>
 @endsection
+

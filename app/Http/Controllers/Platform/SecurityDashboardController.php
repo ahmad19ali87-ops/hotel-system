@@ -6,7 +6,9 @@ use App\Http\Controllers\Controller;
 use App\Models\BlockedIp;
 use App\Models\SecurityLog;
 use App\Models\SiteSetting;
+use App\Models\User;
 use App\Services\GeoIpService;
+use App\Services\ThreatAutoResponseEngine;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -97,6 +99,10 @@ class SecurityDashboardController extends Controller
                     'brute_force_verify_locked' => 'قفل القوة الغاشمة للتفعيل',
                     'blocked_ip_access_attempt' => 'محاولة وصول من IP محظور',
                     'failed_captcha' => 'فشل اختبار التحقق البشري (Captcha)',
+                    'brute_force_account_locked' => 'قفل حساب بسبب التخمين (Anti-Brute Force)',
+                    'replay_attack_session_terminated' => 'إنهاء وحظر جلسة هجوم Replay',
+                    'watched_country_attack' => 'هجوم من دولة مراقبة (Auto Ban 24h)',
+                    'user_account_unlocked' => 'إلغاء قفل حساب مستخدم',
                 ];
                 $row->label = $labels[$row->event_type] ?? $row->event_type;
                 return $row;
@@ -132,6 +138,13 @@ class SecurityDashboardController extends Controller
         $alertCountries = SiteSetting::get('security_alert_countries', 'IL,IR,RU,CN,US');
         $alertThreshold = (int) SiteSetting::get('security_alert_threshold', 5);
 
+        // 8. Threat Auto-Response Engine Status & Locked Accounts
+        $threatEngineSummary = ThreatAutoResponseEngine::getEngineSummary();
+        $lockedUsers = User::whereNotNull('locked_until')
+            ->where('locked_until', '>', now())
+            ->latest('locked_until')
+            ->get();
+
         return view('platform.security.index', compact(
             'totalAttacks24h',
             'criticalAttacks24h',
@@ -147,7 +160,9 @@ class SecurityDashboardController extends Controller
             'logs',
             'blockedIps',
             'alertCountries',
-            'alertThreshold'
+            'alertThreshold',
+            'threatEngineSummary',
+            'lockedUsers'
         ));
     }
 
@@ -216,4 +231,39 @@ class SecurityDashboardController extends Controller
 
         return back()->with('success', "تم تنظيف وأرشفة {$deleted} سجلاً قديماً بنجاح.");
     }
+
+    /**
+     * Unlock a user account locked by Anti-Brute Force.
+     */
+    public function unlockUser(Request $request, User $user)
+    {
+        $user->unlock();
+
+        SecurityLog::record(
+            'user_account_unlocked',
+            'info',
+            "User account ({$user->email}) unlocked manually by Super Admin",
+            $request,
+            $user->id,
+            ['action_taken' => 'account_unlocked_by_admin']
+        );
+
+        return back()->with('success', "تم إلغاء قفل الحساب ({$user->email}) بنجاح وتمكينه من الدخول.");
+    }
+
+    /**
+     * Update Threat Auto-Response Engine configurations.
+     */
+    public function updateThreatEngine(Request $request)
+    {
+        SiteSetting::set('threat_engine_enabled', $request->has('threat_engine_enabled') ? '1' : '0', 'security');
+        SiteSetting::set('threat_rule_sqli', $request->has('threat_rule_sqli') ? '1' : '0', 'security');
+        SiteSetting::set('threat_rule_file', $request->has('threat_rule_file') ? '1' : '0', 'security');
+        SiteSetting::set('threat_rule_country', $request->has('threat_rule_country') ? '1' : '0', 'security');
+        SiteSetting::set('threat_rule_bruteforce', $request->has('threat_rule_bruteforce') ? '1' : '0', 'security');
+        SiteSetting::set('threat_rule_replay', $request->has('threat_rule_replay') ? '1' : '0', 'security');
+
+        return back()->with('success', 'تم حفظ وتحديث إعدادات محرك الاستجابة التلقائي للهجمات بنجاح.');
+    }
 }
+

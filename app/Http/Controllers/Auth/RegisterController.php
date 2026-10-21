@@ -10,6 +10,7 @@ use App\Models\SiteSetting;
 use App\Models\User;
 use App\Services\CaptchaService;
 use App\Services\NotificationService;
+use App\Services\ThreatAutoResponseEngine;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Auth;
@@ -122,11 +123,19 @@ class RegisterController extends Controller
 
         $user = User::findOrFail($userId);
 
+        // Anti-Brute Force Protection: Check if account is locked
+        if ($user->isLocked()) {
+            $diff = $user->locked_until->diffForHumans();
+            return back()->withErrors([
+                'code' => "تم قفل الحساب مؤقتاً لمدة ساعة لحمايته من هجمات التخمين (Anti-Brute Force). ينتهي القفل بعد {$diff}.",
+            ]);
+        }
+
         // Anti-Brute Force Protection: Lock after 5 failed attempts
         if ($user->verification_attempts >= 5) {
-            SecurityLog::record('brute_force_web_verify_locked', 'warning', "Web verification locked for {$user->email}", $request);
+            ThreatAutoResponseEngine::handleBruteForce($user->email, $request->ip() ?: '0.0.0.0', $request);
             return back()->withErrors([
-                'code' => 'تم تجاوز الحد الأقصى للمحاولات (5 محاولات). يرجى طلب كود تفعيل جديد بعد قليل.',
+                'code' => 'تم تجاوز الحد الأقصى للمحاولات (5 محاولات). تم قفل الحساب تلقائياً لمدة ساعة لحمايته.',
             ]);
         }
 
@@ -184,7 +193,10 @@ class RegisterController extends Controller
         );
 
         if ($remaining === 0) {
-            BlockedIp::recordViolation($request->ip() ?: '0.0.0.0', "Repeated failed web verification attempts for {$user->email}", 5, 60, $request->userAgent());
+            ThreatAutoResponseEngine::handleBruteForce($user->email, $request->ip() ?: '0.0.0.0', $request);
+            return back()->withErrors([
+                'code' => 'تم تجاوز الحد الأقصى للمحاولات (5 محاولات). تم قفل الحساب تلقائياً لمدة ساعة لحمايته.',
+            ]);
         }
 
         return back()->withErrors([

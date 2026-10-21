@@ -98,3 +98,4 @@ class GeoIpService
         return mb_chr($firstChar, 'UTF-8') . mb_chr($secondChar, 'UTF-8');
     }
 }
+

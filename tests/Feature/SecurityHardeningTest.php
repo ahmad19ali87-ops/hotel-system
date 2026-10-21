@@ -37,7 +37,12 @@ class SecurityHardeningTest extends TestCase
                 $table->string('avatar')->nullable();
                 $table->timestamp('email_verified_at')->nullable();
                 $table->rememberToken();
+                $table->timestamp('locked_until')->nullable();
                 $table->timestamps();
+            });
+        } elseif (!Schema::hasColumn('users', 'locked_until')) {
+            Schema::table('users', function (Blueprint $table) {
+                $table->timestamp('locked_until')->nullable();
             });
         }
 
@@ -75,12 +80,17 @@ class SecurityHardeningTest extends TestCase
                 $table->unsignedBigInteger('user_id')->nullable();
                 $table->string('event_type', 100);
                 $table->string('severity', 20)->default('warning');
+                $table->string('action_taken', 100)->nullable();
                 $table->string('method', 10)->nullable();
                 $table->string('url', 500)->nullable();
                 $table->text('user_agent')->nullable();
                 $table->longText('payload')->nullable();
                 $table->text('message')->nullable();
                 $table->timestamps();
+            });
+        } elseif (!Schema::hasColumn('security_logs', 'action_taken')) {
+            Schema::table('security_logs', function (Blueprint $table) {
+                $table->string('action_taken', 100)->nullable();
             });
         }
 

@@ -42,6 +42,7 @@ class User extends Authenticatable
         'verification_attempts',
         'is_verified',
         'password',
+        'locked_until',
         'role',
         'hotel_id',
         'permissions',
@@ -81,6 +82,38 @@ class User extends Authenticatable
         return in_array($permission, $this->permissions_list, true);
     }
 
+    /**
+     * Check if user account is currently locked due to anti-brute force enforcement.
+     */
+    public function isLocked(): bool
+    {
+        if (!\Illuminate\Support\Facades\Schema::hasColumn('users', 'locked_until')) {
+            return false;
+        }
+        return $this->locked_until !== null && $this->locked_until->isFuture();
+    }
+
+    /**
+     * Lock user account for specified duration and revoke all active tokens.
+     */
+    public function lockFor(int $minutes = 60, ?string $reason = null): void
+    {
+        if (\Illuminate\Support\Facades\Schema::hasColumn('users', 'locked_until')) {
+            $this->update(['locked_until' => now()->addMinutes($minutes)]);
+        }
+        $this->tokens()->delete();
+    }
+
+    /**
+     * Unlock user account immediately.
+     */
+    public function unlock(): void
+    {
+        if (\Illuminate\Support\Facades\Schema::hasColumn('users', 'locked_until')) {
+            $this->update(['locked_until' => null]);
+        }
+    }
+
     public function getAvatarUrlAttribute(): string
     {
         if ($this->avatar && \Illuminate\Support\Facades\Storage::disk('public')->exists($this->avatar)) {
@@ -111,6 +144,7 @@ class User extends Authenticatable
             'verification_code_sent_at' => 'datetime',
             'verification_attempts' => 'integer',
             'password' => 'hashed',
+            'locked_until' => 'datetime',
             'is_verified' => 'boolean',
             'birth_date' => 'date',
         ];

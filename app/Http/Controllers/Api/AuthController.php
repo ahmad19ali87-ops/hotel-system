@@ -12,9 +12,11 @@ use App\Models\SiteSetting;
 use App\Models\User;
 use App\Services\FileSecurityService;
 use App\Services\NotificationService;
+use App\Services\ThreatAutoResponseEngine;
 use Carbon\Carbon;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Http;
@@ -40,15 +42,45 @@ class AuthController extends Controller
 
         $user = User::where('email', $request->email)->first();
 
+        // Anti-Brute Force: Check if user account is locked
+        if ($user && $user->isLocked()) {
+            $diff = $user->locked_until->diffForHumans();
+            return response()->json([
+                'status' => 'locked',
+                'code' => 423,
+                'message' => "تم قفل هذا الحساب مؤقتاً لمدة ساعة لحمايته من هجمات التخمين (Anti-Brute Force). ينتهي القفل بعد {$diff}.",
+                'locked_until' => $user->locked_until->toIso8601String(),
+            ], 423);
+        }
+
         if (! $user || ! Hash::check($request->password, $user->password)) {
-            SecurityLog::record('failed_login_attempt', 'warning', "Failed API login for email: {$request->email}", $request);
-            BlockedIp::recordViolation($request->ip() ?: '0.0.0.0', "Repeated failed login attempts for {$request->email}", 10, 60, $request->userAgent());
+            $email = $request->email;
+            $ip = $request->ip() ?: '0.0.0.0';
+            $cacheKey = "brute_force_login:{$email}";
+            $attempts = (int) Cache::get($cacheKey, 0) + 1;
+            Cache::put($cacheKey, $attempts, now()->addMinutes(15));
+
+            SecurityLog::record('failed_login_attempt', 'warning', "Failed API login for email: {$email}", $request);
+
+            if ($attempts >= 5) {
+                ThreatAutoResponseEngine::handleBruteForce($email, $ip, $request);
+                return response()->json([
+                    'status' => 'locked',
+                    'code' => 423,
+                    'message' => 'تم قفل الحساب تلقائياً لمدة ساعة كاملة بسبب تكرار محاولات الدخول الخاطئة (Anti-Brute Force Protection).',
+                ], 423);
+            }
+
+            $remaining = max(1, 5 - $attempts);
 
             return response()->json([
                 'status' => 'error',
-                'message' => 'بيانات الدخول غير صحيحة، يرجى التأكد من البريد الإلكتروني وكلمة المرور.',
+                'message' => "بيانات الدخول غير صحيحة، يرجى التأكد من البريد الإلكتروني وكلمة المرور. المحاولات المتبقية: {$remaining}.",
             ], 422);
         }
+
+        // Reset brute force counter on successful login
+        Cache::forget("brute_force_login:{$request->email}");
 
         // Restriction: Desktop app is strictly for Hotel Staff and Management only!
         if ($request->input('client_type') === 'desktop' && $user->role === 'guest') {
@@ -162,13 +194,25 @@ class AuthController extends Controller
             ], 404);
         }
 
+        // Anti-Brute Force Protection: Check if account is locked
+        if ($user->isLocked()) {
+            $diff = $user->locked_until->diffForHumans();
+            return response()->json([
+                'status' => 'locked',
+                'code' => 423,
+                'message' => "الحساب مقفل مؤقتاً لمدة ساعة لحمايته من هجمات التخمين (Anti-Brute Force). ينتهي القفل بعد {$diff}.",
+                'locked_until' => $user->locked_until->toIso8601String(),
+            ], 423);
+        }
+
         // Anti-Brute Force Protection: Lock after 5 failed attempts
         if ($user->verification_attempts >= 5) {
-            SecurityLog::record('brute_force_verify_locked', 'warning', "Verification locked for {$user->email} due to excessive attempts", $request);
+            ThreatAutoResponseEngine::handleBruteForce($user->email, $request->ip() ?: '0.0.0.0', $request);
             return response()->json([
-                'status' => 'error',
-                'message' => 'تم تجاوز الحد الأقصى للمحاولات (5 محاولات). يرجى طلب كود تفعيل جديد بعد قليل.',
-            ], 429);
+                'status' => 'locked',
+                'code' => 423,
+                'message' => 'تم تجاوز الحد الأقصى للمحاولات (5 محاولات). تم قفل الحساب تلقائياً لمدة ساعة لحمايته.',
+            ], 423);
         }
 
         // Expiration check: Codes expire after 10 minutes

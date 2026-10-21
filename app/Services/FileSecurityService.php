@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\BlockedIp;
 use App\Models\SecurityLog;
+use App\Services\ThreatAutoResponseEngine;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
@@ -203,20 +204,21 @@ class FileSecurityService
     }
 
     /**
-     * Handle security attack detection: record critical log and auto-block IP if threshold exceeded.
+     * Handle security attack detection: Trigger Threat Auto-Response Engine (IP block + instant alarm).
      */
     protected static function triggerAttackDetected(string $ip, string $details): void
     {
+        // Rule 2: Malicious file upload -> IP block + Instant Alarm
+        ThreatAutoResponseEngine::handleMaliciousFileUpload($ip, 'file_upload', $details, request());
+
         SecurityLog::record(
             'malicious_file_upload',
             'critical',
             $details,
             request(),
-            auth()->id()
+            auth()->id(),
+            ['action_taken' => 'ip_blocked_alert_sent']
         );
-
-        // Immediate violation recording. 2 attempts = 24-hour block
-        BlockedIp::recordViolation($ip, "Malicious file upload attempt: {$details}", 2, 1440, request()->userAgent());
     }
 }
 

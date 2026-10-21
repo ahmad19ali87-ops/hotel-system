@@ -4,6 +4,7 @@ namespace App\Http\Middleware;
 
 use App\Models\BlockedIp;
 use App\Models\SecurityLog;
+use App\Services\ThreatAutoResponseEngine;
 use Closure;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
@@ -16,6 +17,16 @@ class PreventApiReplayAttacks
      */
     public function handle(Request $request, Closure $next): Response
     {
+        // Immediate check: Has this bearer token been terminated due to replay attacks?
+        $bearer = $request->bearerToken();
+        if ($bearer && Cache::has('blacklisted_bearer:' . hash('sha256', $bearer))) {
+            return response()->json([
+                'status' => 'error',
+                'code' => 401,
+                'message' => 'تم إنهاء صلاحية وحظر هذه الجلسة والتوكن بصورة نهائية لأسباب أمنية (Session Terminated).',
+            ], 401);
+        }
+
         // Only apply to state-changing methods on API endpoints
         if (in_array($request->method(), ['GET', 'HEAD', 'OPTIONS'], true)) {
             return $next($request);
@@ -29,17 +40,13 @@ class PreventApiReplayAttacks
 
             // Allow maximum 5 minutes (300 seconds) clock drift
             if (abs($currentTime - $requestTime) > 300) {
-                SecurityLog::record(
-                    'replay_attack_expired_timestamp',
-                    'warning',
-                    "Request rejected due to expired or drifted timestamp. Current: {$currentTime}, Request: {$requestTime}",
-                    $request
-                );
+                // Rule 5: Threat Auto-Response terminates session
+                ThreatAutoResponseEngine::handleReplayAttack($request, "Expired or drifted timestamp: Current {$currentTime}, Request {$requestTime}");
 
                 return response()->json([
                     'status' => 'error',
                     'code' => 400,
-                    'message' => 'تم رفض الطلب: توقيت الطلب منتهي الصلاحية أو غير متطابق زمنياً (Clock skew / Expired request).',
+                    'message' => 'تم رفض الطلب وإنهاء الجلسة: توقيت الطلب منتهي الصلاحية أو غير متطابق زمنياً (Clock skew / Expired request).',
                 ], 400);
             }
         }
@@ -49,17 +56,13 @@ class PreventApiReplayAttacks
         if ($nonce) {
             $nonceCacheKey = 'api_nonce:' . md5($nonce . '|' . ($request->user() ? $request->user()->id : $request->ip()));
             if (!Cache::add($nonceCacheKey, true, now()->addMinutes(15))) {
-                SecurityLog::record(
-                    'replay_attack_nonce_reused',
-                    'warning',
-                    "Replay attack detected: Nonce reused ({$nonce})",
-                    $request
-                );
+                // Rule 5: Threat Auto-Response terminates session
+                ThreatAutoResponseEngine::handleReplayAttack($request, "Nonce reused ({$nonce})");
 
                 return response()->json([
                     'status' => 'error',
                     'code' => 409,
-                    'message' => 'تم رفض الطلب: تم استخدام رمز التحقق أو العملية مسبقاً (Nonce Reused / Replay Attack).',
+                    'message' => 'تم رفض الطلب: تم إنهاء وحظر الجلسة والتوكن بالكامل لاكتشاف محاولة إعادة إرسال غير مصرح بها (Replay Attack).',
                 ], 409);
             }
         } else {
