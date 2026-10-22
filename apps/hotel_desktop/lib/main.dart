@@ -2302,6 +2302,11 @@ $htmlContent
     final dateStr = inv['paid_at'] ?? inv['created_at'] ?? DateTime.now().toString().substring(0, 16);
     final hotelName = AppState.currentUser?['hotel_name'] ?? 'فندق المحبة والضيافة';
     final cashier = AppState.currentUser?['name'] ?? 'موظف الاستقبال';
+    final hotelSlug = inv['hotel']?['slug'] ?? inv['hotel_slug'] ?? AppState.currentUser?['hotel_slug'] ?? 'hotel';
+    final invoiceId = inv['id'] ?? '';
+    final baseUrl = AppState.serverBaseUrl.isNotEmpty ? AppState.serverBaseUrl : 'https://hotel.ahmadinsights.online';
+    final publicUrl = '$baseUrl/$hotelSlug/invoices/$invoiceId';
+    final qrImgUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=140x140&margin=0&data=${Uri.encodeComponent(publicUrl)}';
 
     String formatNum(dynamic v) {
       if (v == null) return '0.00';
@@ -2357,6 +2362,11 @@ $thermalTaxRow
 <div class="row total"><span>الإجمالي المسدد:</span><span>${formatNum(total)} $currency</span></div>
 <div class="text-center" style="margin-top: 8px;">
   <span class="badge">$statusBadge</span>
+</div>
+<div class="divider"></div>
+<div class="text-center" style="margin: 8px 0;">
+  <img src="$qrImgUrl" width="90" height="90" alt="QR Code" style="display: block; margin: 0 auto 4px auto;">
+  <div style="font-size: 8.5px; color: #444; word-break: break-all;">/$hotelSlug/invoices/$invoiceId</div>
 </div>
 <div class="divider"></div>
 <div class="text-center" style="font-size: 10px; color: #555;">
@@ -2472,11 +2482,21 @@ td { padding: 10px; border: 1px solid #cbd5e1; text-align: right; }
   </tbody>
 </table>
 
-<div class="totals-box">
-  <div class="totals-row"><span>المجموع الفرعي:</span><span>${formatNum(amount)} $currency</span></div>
-  $a4ServiceTotal
-  $a4TaxTotal
-  <div class="totals-row totals-total"><span>المبلغ الإجمالي النهائي:</span><span>${formatNum(total)} $currency</span></div>
+<div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px;">
+  <!-- QR Code Section -->
+  <div style="background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 10px 14px; text-align: center; width: 170px;">
+    <img src="$qrImgUrl" width="105" height="105" alt="QR Code" style="display: block; margin: 0 auto 4px auto;">
+    <div style="font-size: 10px; font-weight: bold; color: #0f172a;">رمز التحقق الرقمي من الفاتورة</div>
+    <div style="font-size: 8.5px; color: #64748b; margin-top: 2px; word-break: break-all;">/$hotelSlug/invoices/$invoiceId</div>
+  </div>
+
+  <!-- Totals Box -->
+  <div class="totals-box" style="margin: 0; width: 300px;">
+    <div class="totals-row"><span>المجموع الفرعي للإقامة:</span><span>${formatNum(amount)} $currency</span></div>
+    $a4ServiceTotal
+    $a4TaxTotal
+    <div class="totals-row totals-total"><span>المبلغ الإجمالي النهائي:</span><span>${formatNum(total)} $currency</span></div>
+  </div>
 </div>
 
 <div class="signatures">
@@ -2492,6 +2512,11 @@ td { padding: 10px; border: 1px solid #cbd5e1; text-align: right; }
     <div style="font-weight: bold; font-size: 12px; color: #475569;">ختم وتوقيع إدارة الفندق</div>
     <div class="sign-line"></div>
   </div>
+</div>
+
+<div style="border-top: 1px solid #e2e8f0; margin-top: 30px; padding-top: 10px; text-align: center; font-size: 11px; color: #64748b;">
+  <div>$hotelName · نظام الإدارة الفندقية الموحد</div>
+  <div style="color: #94a3b8; margin-top: 3px;">شكراً لاختياركم فندقنا · نتمنى لكم إقامة سعيدة ومميزة</div>
 </div>
 </body>
 </html>
@@ -3785,6 +3810,11 @@ class _InvoicePrintReceiptDialogState extends State<InvoicePrintReceiptDialog> {
     final dateStr = inv['paid_at'] ?? inv['created_at'] ?? DateTime.now().toString().substring(0, 16);
     final hotelName = AppState.currentUser?['hotel_name'] ?? 'فندق المحبة والضيافة';
     final cashier = AppState.currentUser?['name'] ?? 'موظف الاستقبال';
+    final hotelSlug = inv['hotel']?['slug'] ?? inv['hotel_slug'] ?? AppState.currentUser?['hotel_slug'] ?? 'hotel';
+    final invoiceId = inv['id'] ?? '';
+    final baseUrl = AppState.serverBaseUrl.isNotEmpty ? AppState.serverBaseUrl : 'https://hotel.ahmadinsights.online';
+    final publicUrl = '$baseUrl/$hotelSlug/invoices/$invoiceId';
+    final qrImgUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=140x140&margin=0&data=${Uri.encodeComponent(publicUrl)}';
 
     return Directionality(
       textDirection: TextDirection.rtl,
@@ -5621,6 +5651,181 @@ class _GuestsTabState extends State<GuestsTab> {
     if (mounted) setState(() => _isLoading = false);
   }
 
+  String _formatNumber(dynamic val) {
+    if (val == null) return '0';
+    double d = double.tryParse(val.toString()) ?? 0;
+    if (d == d.roundToDouble()) {
+      return d.toInt().toString().replaceAllMapped(
+            RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'),
+            (m) => '${m[1]},',
+          );
+    }
+    return d.toStringAsFixed(2);
+  }
+
+  Future<void> _openGuestStaysDialog(Map<String, dynamic> guest) async {
+    final guestId = guest['id'];
+    final guestName = guest['name'] ?? 'النزيل';
+
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        return FutureBuilder<http.Response>(
+          future: http.get(
+            Uri.parse('${AppState.apiUrl}/staff/guests/$guestId/stays'),
+            headers: {
+              'Authorization': 'Bearer ${AppState.token}',
+              'Accept': 'application/json',
+            },
+          ),
+          builder: (context, snapshot) {
+            Widget body;
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              body = const Center(
+                child: Padding(
+                  padding: EdgeInsets.all(40),
+                  child: CircularProgressIndicator(),
+                ),
+              );
+            } else if (snapshot.hasError || !snapshot.hasData || snapshot.data!.statusCode != 200) {
+              body = const Center(
+                child: Padding(
+                  padding: EdgeInsets.all(30),
+                  child: Text('تعذر تحميل سجل الإقامات، يرجى المحاولة لاحقاً.', style: TextStyle(color: Colors.red)),
+                ),
+              );
+            } else {
+              final json = jsonDecode(snapshot.data!.body);
+              final List stays = json['stays'] ?? [];
+
+              if (stays.isEmpty) {
+                body = const Center(
+                  child: Padding(
+                    padding: EdgeInsets.all(30),
+                    child: Text('لا توجد إقامات مسجلة لهذا النزيل حتى الآن.', style: TextStyle(color: Color(0xFF64748B))),
+                  ),
+                );
+              } else {
+                body = ListView.separated(
+                  shrinkWrap: true,
+                  itemCount: stays.length,
+                  separatorBuilder: (_, __) => const Divider(height: 1),
+                  itemBuilder: (_, idx) {
+                    final s = stays[idx];
+                    final isUsd = s['currency'] == 'USD';
+                    final rate = isUsd ? '\$${_formatNumber(s['nightly_rate'])} USD' : '${_formatNumber(s['nightly_rate'])} ل.س';
+                    final total = isUsd ? '\$${_formatNumber(s['invoice_total'])} USD' : '${_formatNumber(s['invoice_total'])} ل.س';
+                    final paid = isUsd ? '\$${_formatNumber(s['actual_paid'])} USD' : '${_formatNumber(s['actual_paid'])} ل.س';
+                    final isPaid = s['is_paid'] == true;
+
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFEFF6FF),
+                                  borderRadius: BorderRadius.circular(6),
+                                  border: Border.all(color: const Color(0xFFBFDBFE)),
+                                ),
+                                child: Text('غرفة ${s['room_number']}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF1D4ED8))),
+                              ),
+                              const SizedBox(width: 8),
+                              Text('${s['room_type']}', style: const TextStyle(fontSize: 12, color: Color(0xFF475569))),
+                              const Spacer(),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                decoration: BoxDecoration(
+                                  color: isPaid ? const Color(0xFFDCFCE7) : const Color(0xFFFEE2E2),
+                                  borderRadius: BorderRadius.circular(6),
+                                  border: Border.all(color: isPaid ? const Color(0xFF86EFAC) : const Color(0xFFFCA5A5)),
+                                ),
+                                child: Text(
+                                  isPaid ? 'مسدد بالكامل ✔' : 'غير مسدد',
+                                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: isPaid ? const Color(0xFF166534) : const Color(0xFF991B1B)),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          Row(
+                            children: [
+                              const Icon(Icons.calendar_today, size: 13, color: Color(0xFF64748B)),
+                              const SizedBox(width: 4),
+                              Text('${s['check_in']} ⬅️ ${s['check_out']} (${s['nights']} ليالٍ)', style: const TextStyle(fontSize: 12, color: Color(0xFF334155))),
+                            ],
+                          ),
+                          const SizedBox(height: 6),
+                          Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF8FAFC),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: const Color(0xFFE2E8F0)),
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Row(
+                                  children: [
+                                    const Text('سعر الليلة الفعلي: ', style: TextStyle(fontSize: 12, color: Color(0xFF64748B))),
+                                    Text(rate, style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: isUsd ? const Color(0xFF047857) : const Color(0xFF1D4ED8))),
+                                  ],
+                                ),
+                                Row(
+                                  children: [
+                                    const Text('المسدد فعلاً: ', style: TextStyle(fontSize: 12, color: Color(0xFF64748B))),
+                                    Text(paid, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
+                                    Text(' / $total', style: const TextStyle(fontSize: 11, color: Color(0xFF64748B))),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                );
+              }
+            }
+
+            return AlertDialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              title: Row(
+                children: [
+                  const Icon(Icons.hotel_class, color: Color(0xFF1D4ED8)),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'سجل إقامات النزيل: $guestName',
+                      style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+              content: SizedBox(
+                width: 600,
+                child: body,
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: const Text('إغلاق'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
   void _openAddGuestDialog() {
     if (AppState.isReadOnlyOwner()) return;
 
@@ -6362,21 +6567,27 @@ class _GuestsTabState extends State<GuestsTab> {
                     ),
                   const Spacer(),
 
-                  // Stays count pill
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFDCFCE7),
-                      borderRadius: BorderRadius.circular(6),
-                      border: Border.all(color: const Color(0xFF86EFAC)),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.hotel, size: 12, color: Color(0xFF166534)),
-                        const SizedBox(width: 4),
-                        Text('$staysCount إقامة فندقية', style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF166534))),
-                      ],
+                  // Stays count pill (clickable to view history)
+                  InkWell(
+                    onTap: () => _openGuestStaysDialog(g),
+                    borderRadius: BorderRadius.circular(6),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFDCFCE7),
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(color: const Color(0xFF86EFAC)),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.hotel, size: 12, color: Color(0xFF166534)),
+                          const SizedBox(width: 4),
+                          Text('$staysCount إقامة فندقية', style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF166534))),
+                          const SizedBox(width: 2),
+                          const Icon(Icons.arrow_drop_down, size: 14, color: Color(0xFF166534)),
+                        ],
+                      ),
                     ),
                   ),
                 ],

@@ -851,15 +851,6 @@
                                         </div>
                                     </a>
                                 </li>
-                                <li>
-                                    <a class="custom-dropdown-item" href="{{ route('admin.app-manager.index') }}">
-                                        <span class="dropdown-item-icon bg-pink-100 text-pink-700">📱</span>
-                                        <div>
-                                            <span class="dropdown-item-title">{{ $isEn ? 'Mobile App Manager' : 'إدارة تطبيق الجوال' }}</span>
-                                            <span class="dropdown-item-desc">{{ $isEn ? 'Destinations photos & promo banners' : 'صور الوجهات والبنرات الإعلانية' }}</span>
-                                        </div>
-                                    </a>
-                                </li>
                             </ul>
                         </div>
 

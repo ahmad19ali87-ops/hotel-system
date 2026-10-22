@@ -92,6 +92,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
         // Guests
         Route::get('/guests', [StaffController::class, 'guests']);
+        Route::get('/guests/{id}/stays', [StaffController::class, 'guestStays']);
         Route::post('/guests', [StaffController::class, 'storeGuest']);
         Route::put('/guests/{id}', [StaffController::class, 'updateGuest']);
         Route::delete('/guests/{id}', [StaffController::class, 'deleteGuest']);

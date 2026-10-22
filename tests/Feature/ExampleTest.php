@@ -2142,5 +2142,191 @@ class ExampleTest extends TestCase
             ],
         ]);
     }
-}
 
+    public function test_hotel_manager_cannot_access_app_manager_while_super_admin_can()
+    {
+        if (!\Illuminate\Support\Facades\Schema::hasTable('app_banners')) {
+            \Illuminate\Support\Facades\Schema::create('app_banners', function ($table) {
+                $table->id();
+                $table->string('title');
+                $table->string('subtitle')->nullable();
+                $table->string('image')->nullable();
+                $table->string('target_type')->default('none');
+                $table->unsignedBigInteger('target_id')->nullable();
+                $table->string('link_url')->nullable();
+                $table->integer('sort_order')->default(0);
+                $table->boolean('is_active')->default(true);
+                $table->timestamps();
+            });
+        }
+        if (!\Illuminate\Support\Facades\Schema::hasTable('app_broadcasts')) {
+            \Illuminate\Support\Facades\Schema::create('app_broadcasts', function ($table) {
+                $table->id();
+                $table->unsignedBigInteger('sender_id')->nullable();
+                $table->string('type')->default('message');
+                $table->string('title');
+                $table->text('body');
+                $table->text('attachment')->nullable();
+                $table->string('target_audience')->default('all');
+                $table->integer('recipients_count')->default(0);
+                $table->timestamps();
+            });
+        }
+        $hotel = Hotel::create([
+            'name' => 'فندق دمشق للشام',
+            'slug' => 'damascus-sham',
+            'province' => 'دمشق',
+            'is_visible' => true,
+        ]);
+
+        $manager = User::create([
+            'name' => 'مدير فندق',
+            'email' => 'hotel_manager_test@example.com',
+            'password' => bcrypt('password123'),
+            'role' => 'hotel_manager',
+            'hotel_id' => $hotel->id,
+            'is_verified' => true,
+        ]);
+
+        $superAdmin = User::create([
+            'name' => 'سوبر ادمن',
+            'email' => 'super_admin_test@example.com',
+            'password' => bcrypt('password123'),
+            'role' => 'super_admin',
+            'is_verified' => true,
+        ]);
+
+        // Hotel manager gets 403 Forbidden
+        $resForbidden = $this->actingAs($manager)->get(route('admin.app-manager.index'));
+        $resForbidden->assertStatus(403);
+
+        // Super admin gets 200 OK
+        $resAllowed = $this->actingAs($superAdmin)->get(route('admin.app-manager.index'));
+        $resAllowed->assertStatus(200);
+    }
+
+    public function test_guest_stays_page_and_api_show_accurate_night_rate_and_currency()
+    {
+        $hotel = Hotel::create([
+            'name' => 'فندق الياسمين الدمشقي',
+            'slug' => 'jasmine-damascus',
+            'province' => 'دمشق',
+            'is_visible' => true,
+        ]);
+
+        $staff = User::create([
+            'name' => 'موظف استقبال',
+            'email' => 'reception_stays@example.com',
+            'password' => bcrypt('password123'),
+            'role' => 'hotel_admin',
+            'hotel_id' => $hotel->id,
+            'is_verified' => true,
+        ]);
+
+        $room = Room::create([
+            'hotel_id' => $hotel->id,
+            'room_number' => '404',
+            'price' => 450000,
+            'price_usd' => 90,
+            'status' => 'available',
+        ]);
+
+        $guest = \App\Models\Guest::create([
+            'hotel_id' => $hotel->id,
+            'name' => 'سامر الخطيب',
+            'phone' => '0944001122',
+            'id_number' => '01020304050',
+            'nationality' => 'سوري',
+        ]);
+
+        // 1. USD Stay: 2 nights at $90/night = $180
+        $bookingUsd = Booking::create([
+            'hotel_id' => $hotel->id,
+            'room_id' => $room->id,
+            'guest_id' => $guest->id,
+            'created_by' => $staff->id,
+            'check_in' => now()->toDateString(),
+            'check_out' => now()->addDays(2)->toDateString(),
+            'currency' => 'USD',
+            'total_price' => 180,
+            'total_price_usd' => 180,
+            'status' => 'checked_out',
+        ]);
+
+        $invoiceUsd = Invoice::create([
+            'hotel_id' => $hotel->id,
+            'booking_id' => $bookingUsd->id,
+            'room_id' => $room->id,
+            'amount' => 180,
+            'total' => 180,
+            'currency' => 'USD',
+            'status' => 'paid',
+        ]);
+
+        \App\Models\Payment::create([
+            'invoice_id' => $invoiceUsd->id,
+            'amount' => 180,
+            'currency' => 'USD',
+            'status' => 'success',
+            'paid_at' => now(),
+        ]);
+
+        // 2. SYP Stay: 3 nights at 450,000 SYP/night = 1,350,000 SYP
+        $bookingSyp = Booking::create([
+            'hotel_id' => $hotel->id,
+            'room_id' => $room->id,
+            'guest_id' => $guest->id,
+            'created_by' => $staff->id,
+            'check_in' => now()->subDays(10)->toDateString(),
+            'check_out' => now()->subDays(7)->toDateString(),
+            'currency' => 'SYP',
+            'total_price' => 1350000,
+            'total_price_usd' => 0,
+            'status' => 'checked_out',
+        ]);
+
+        $invoiceSyp = Invoice::create([
+            'hotel_id' => $hotel->id,
+            'booking_id' => $bookingSyp->id,
+            'room_id' => $room->id,
+            'amount' => 1350000,
+            'total' => 1350000,
+            'currency' => 'SYP',
+            'status' => 'paid',
+        ]);
+
+        \App\Models\Payment::create([
+            'invoice_id' => $invoiceSyp->id,
+            'amount' => 1350000,
+            'currency' => 'SYP',
+            'status' => 'success',
+            'paid_at' => now()->subDays(7),
+        ]);
+
+        // Verify Web View
+        $viewRes = $this->actingAs($staff)->get(route('guests.history', $guest));
+        $viewRes->assertStatus(200);
+        $viewRes->assertSee('$ 90.00');
+        $viewRes->assertSee('USD / ليلة');
+        $viewRes->assertSee('450,000');
+        $viewRes->assertSee('ل.س / ليلة');
+
+        // Verify API Stays endpoint
+        $apiRes = $this->actingAs($staff, 'sanctum')->getJson("/api/staff/guests/{$guest->id}/stays");
+        $apiRes->assertStatus(200);
+        $stays = $apiRes->json('stays');
+        $this->assertCount(2, $stays);
+
+        $usdStay = collect($stays)->firstWhere('currency', 'USD');
+        $this->assertEquals(90.0, (float)$usdStay['nightly_rate']);
+        $this->assertEquals(180.0, (float)$usdStay['invoice_total']);
+        $this->assertEquals(180.0, (float)$usdStay['actual_paid']);
+        $this->assertTrue($usdStay['is_paid']);
+
+        $sypStay = collect($stays)->firstWhere('currency', 'SYP');
+        $this->assertEquals(450000.0, (float)$sypStay['nightly_rate']);
+        $this->assertEquals(1350000.0, (float)$sypStay['invoice_total']);
+        $this->assertEquals(1350000.0, (float)$sypStay['actual_paid']);
+        $this->assertTrue($sypStay['is_paid']);
+    }
+}

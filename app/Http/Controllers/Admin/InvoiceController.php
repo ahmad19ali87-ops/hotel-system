@@ -80,9 +80,15 @@ class InvoiceController extends Controller
     public function show(Invoice $invoice)
     {
         $this->ensureInvoiceBelongsToHotel($invoice);
-        $invoice->load(['booking.guest', 'room', 'payments']);
+        $invoice->load(['hotel', 'booking.guest', 'booking.creator', 'room', 'payments']);
 
-        return view('admin.invoices.show', compact('invoice'));
+        $publicUrl = URL::route('invoice.by-hotel', [
+            'hotelSlug' => $invoice->hotel->slug,
+            'invoice' => $invoice->id,
+        ]);
+        $qrCode = \SimpleSoftwareIO\QrCode\Facades\QrCode::format('svg')->size(130)->margin(1)->generate($publicUrl);
+
+        return view('admin.invoices.show', compact('invoice', 'publicUrl', 'qrCode'));
     }
 
     public function markPaid(Request $request, Invoice $invoice, InvoicePdfService $pdfService)
@@ -165,13 +171,19 @@ class InvoiceController extends Controller
     private function renderPublicInvoice(Invoice $invoice)
     {
         abort_unless($invoice->status === 'paid', 404);
-        $invoice->load(['hotel', 'booking.guest', 'room']);
+        $invoice->load(['hotel', 'booking.guest', 'booking.creator', 'room', 'payments']);
         $hotelPhones = $invoice->hotel?->phones ? (json_decode($invoice->hotel->phones, true) ?: []) : [];
         if (! $hotelPhones && $invoice->hotel?->phone) {
             $hotelPhones = [$invoice->hotel->phone];
         }
 
-        return view('public.invoice', compact('invoice', 'hotelPhones'));
+        $publicUrl = URL::route('invoice.by-hotel', [
+            'hotelSlug' => $invoice->hotel->slug,
+            'invoice' => $invoice->id,
+        ]);
+        $qrCode = \SimpleSoftwareIO\QrCode\Facades\QrCode::format('svg')->size(130)->margin(1)->generate($publicUrl);
+
+        return view('public.invoice', compact('invoice', 'hotelPhones', 'publicUrl', 'qrCode'));
     }
 
     public function destroy(Request $request, Invoice $invoice)

@@ -17,13 +17,38 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
-class AppManagerController extends Controller
+use Illuminate\Routing\Controllers\HasMiddleware;
+use Illuminate\Routing\Controllers\Middleware;
+
+class AppManagerController extends Controller implements HasMiddleware
 {
+    public static function middleware(): array
+    {
+        return [
+            function ($request, $next) {
+                $user = Auth::user();
+                if (!$user || !in_array($user->role, ['super_admin', 'platform_admin', 'platform_staff'], true)) {
+                    abort(403, 'غير مصرح لك بالوصول لإدارة تطبيق الجوال. هذا القسم مخصص لمدير وموظفي المنصة فقط.');
+                }
+                return $next($request);
+            },
+        ];
+    }
+
+    private function authorizePlatformAccess(): void
+    {
+        $user = Auth::user();
+        if (!$user || !in_array($user->role, ['super_admin', 'platform_admin', 'platform_staff'], true)) {
+            abort(403, 'غير مصرح لك بالوصول لإدارة تطبيق الجوال. هذا القسم مخصص لمدير وموظفي المنصة فقط.');
+        }
+    }
+
     /**
      * Display the Mobile App Management Dashboard.
      */
     public function index()
     {
+        $this->authorizePlatformAccess();
         $destinations = Destination::orderBy('sort_order')->latest('id')->get();
         $banners = AppBanner::orderBy('sort_order')->latest('id')->get();
         $hotels = Hotel::select('id', 'name', 'province')->where('is_visible', true)->orderBy('name')->get();
@@ -62,6 +87,7 @@ class AppManagerController extends Controller
      */
     public function storeDestination(Request $request)
     {
+        $this->authorizePlatformAccess();
         $validated = $request->validate([
             'title' => ['required', 'string', 'max:150'],
             'subtitle' => ['nullable', 'string', 'max:255'],
@@ -97,6 +123,7 @@ class AppManagerController extends Controller
      */
     public function updateDestination(Request $request, Destination $destination)
     {
+        $this->authorizePlatformAccess();
         $validated = $request->validate([
             'title' => ['required', 'string', 'max:150'],
             'subtitle' => ['nullable', 'string', 'max:255'],
@@ -144,6 +171,7 @@ class AppManagerController extends Controller
      */
     public function destroyDestination(Destination $destination)
     {
+        $this->authorizePlatformAccess();
         if ($destination->image && !str_starts_with($destination->image, 'http')) {
             Storage::disk('public')->delete($destination->image);
         }
@@ -159,6 +187,7 @@ class AppManagerController extends Controller
      */
     public function toggleDestination(Destination $destination)
     {
+        $this->authorizePlatformAccess();
         $destination->update(['is_active' => !$destination->is_active]);
 
         return redirect()->route('admin.app-manager.index', ['tab' => 'destinations'])
@@ -170,6 +199,7 @@ class AppManagerController extends Controller
      */
     public function storeBanner(Request $request)
     {
+        $this->authorizePlatformAccess();
         $validated = $request->validate([
             'title' => ['required', 'string', 'max:191'],
             'subtitle' => ['nullable', 'string', 'max:1000'],
@@ -211,6 +241,7 @@ class AppManagerController extends Controller
      */
     public function updateBanner(Request $request, AppBanner $banner)
     {
+        $this->authorizePlatformAccess();
         $validated = $request->validate([
             'title' => ['required', 'string', 'max:191'],
             'subtitle' => ['nullable', 'string', 'max:1000'],
@@ -264,6 +295,7 @@ class AppManagerController extends Controller
      */
     public function destroyBanner(AppBanner $banner)
     {
+        $this->authorizePlatformAccess();
         if ($banner->image && !str_starts_with($banner->image, 'http')) {
             Storage::disk('public')->delete($banner->image);
         }
@@ -279,6 +311,7 @@ class AppManagerController extends Controller
      */
     public function toggleBanner(AppBanner $banner)
     {
+        $this->authorizePlatformAccess();
         $banner->update(['is_active' => !$banner->is_active]);
 
         return redirect()->route('admin.app-manager.index', ['tab' => 'banners'])
@@ -290,6 +323,7 @@ class AppManagerController extends Controller
      */
     public function storeBroadcastMessage(Request $request)
     {
+        $this->authorizePlatformAccess();
         $validated = $request->validate([
             'subject' => ['required', 'string', 'max:191'],
             'body' => ['required', 'string', 'max:5000'],
@@ -366,6 +400,7 @@ class AppManagerController extends Controller
      */
     public function storeBroadcastNotification(Request $request)
     {
+        $this->authorizePlatformAccess();
         $validated = $request->validate([
             'title' => ['required', 'string', 'max:150'],
             'body' => ['required', 'string', 'max:1000'],
@@ -428,6 +463,7 @@ class AppManagerController extends Controller
      */
     public function destroyBroadcast(AppBroadcast $broadcast)
     {
+        $this->authorizePlatformAccess();
         $type = $broadcast->type;
         $broadcast->delete();
 
@@ -442,6 +478,7 @@ class AppManagerController extends Controller
      */
     public function updateWelcomeNotification(Request $request)
     {
+        $this->authorizePlatformAccess();
         $validated = $request->validate([
             'app_welcome_enabled' => ['nullable'],
             'app_welcome_title' => ['required', 'string', 'max:255'],

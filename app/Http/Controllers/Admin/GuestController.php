@@ -226,7 +226,10 @@ class GuestController extends Controller
     public function history(Guest $guest)
     {
         $this->ensureGuestBelongsToHotel($guest);
-        $bookings = $guest->bookings()->with('room')->latest('created_at')->get();
+        $bookings = $guest->bookings()
+            ->with(['room.roomType', 'invoices.payments'])
+            ->latest('check_in')
+            ->get();
 
         return view('admin.guests.history', compact('guest', 'bookings'));
     }

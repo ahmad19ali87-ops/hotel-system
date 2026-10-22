@@ -1009,6 +1009,81 @@ class StaffController extends Controller
     }
 
     /**
+     * Get stay history for a guest with accurate nightly price and currency.
+     */
+    public function guestStays(Request $request, $id)
+    {
+        $user = $this->checkStaffAccess($request);
+        $guest = Guest::where('hotel_id', $user->hotel_id)->findOrFail($id);
+
+        $bookings = Booking::where('hotel_id', $user->hotel_id)
+            ->where('guest_id', $guest->id)
+            ->with(['room.roomType', 'invoices.payments'])
+            ->latest('check_in')
+            ->get();
+
+        $stays = $bookings->map(function ($b) {
+            $checkIn = \Carbon\Carbon::parse($b->check_in);
+            $checkOut = \Carbon\Carbon::parse($b->check_out);
+            $nights = max(1, $checkIn->diffInDays($checkOut));
+
+            $invoice = $b->invoices->first();
+            $currency = $invoice?->currency ?? $b->currency ?? 'SYP';
+
+            // Calculate accurate nightly rate
+            if ($invoice && (float)$invoice->amount > 0) {
+                $nightlyRate = round((float)$invoice->amount / $nights, 2);
+            } elseif ($currency === 'USD' && (float)$b->total_price_usd > 0) {
+                $nightlyRate = round((float)$b->total_price_usd / $nights, 2);
+            } else {
+                $nightlyRate = round((float)$b->total_price / $nights, 2);
+            }
+
+            // Calculate exact total and paid amount
+            if ($invoice) {
+                $invoiceTotal = (float)$invoice->total;
+                $isPaid = $invoice->status === 'paid';
+                $actualPaid = $isPaid ? $invoiceTotal : (float)$invoice->payments->where('status', 'success')->sum('amount');
+            } else {
+                $invoiceTotal = ($currency === 'USD' && (float)$b->total_price_usd > 0) ? (float)$b->total_price_usd : (float)$b->total_price;
+                $isPaid = $b->status === 'checked_out';
+                $actualPaid = $isPaid ? $invoiceTotal : 0.0;
+            }
+
+            return [
+                'booking_id' => $b->id,
+                'room_id' => $b->room_id,
+                'room_number' => $b->room?->room_number ?? '—',
+                'room_type' => $b->room?->roomType?->name ?? 'غرفة فندقية',
+                'check_in' => $b->check_in,
+                'check_out' => $b->check_out,
+                'nights' => $nights,
+                'nightly_rate' => $nightlyRate,
+                'currency' => $currency,
+                'currency_symbol' => $currency === 'USD' ? '$' : 'ل.س',
+                'status' => $b->status,
+                'invoice_id' => $invoice?->id,
+                'invoice_number' => $invoice?->invoice_number,
+                'invoice_status' => $invoice?->status ?? 'no_invoice',
+                'invoice_total' => $invoiceTotal,
+                'actual_paid' => $actualPaid,
+                'is_paid' => ($invoice?->status === 'paid') || ($actualPaid >= $invoiceTotal && $invoiceTotal > 0),
+            ];
+        });
+
+        return response()->json([
+            'status' => 'success',
+            'guest' => [
+                'id' => $guest->id,
+                'name' => $guest->name,
+                'phone' => $guest->phone,
+                'national_id' => $guest->national_id ?? $guest->id_number,
+            ],
+            'stays' => $stays,
+        ]);
+    }
+
+    /**
      * List and store accounting records.
      */
     public function accounts(Request $request)
