@@ -2170,5 +2170,171 @@ class StaffController extends Controller
             'message' => "لم يتم العثور على أي حجز أو فاتورة أو نزيل بالرمز: {$code}",
         ], 404);
     }
-}
 
+    /**
+     * Get hotel subscription details for desktop and mobile clients.
+     */
+    public function subscriptionInfo(Request $request)
+    {
+        $user = $this->checkStaffAccess($request);
+        $hotel = Hotel::with(['rooms'])->findOrFail($user->hotel_id);
+        
+        \App\Models\SubscriptionPlan::seedDefaultsIfNeeded();
+        $sub = $hotel->active_subscription;
+
+        if (!$sub) {
+            $defaultPlan = \App\Models\SubscriptionPlan::where('slug', 'pro')->first() ?? \App\Models\SubscriptionPlan::first();
+            if ($defaultPlan) {
+                $sub = \App\Models\HotelSubscription::create([
+                    'hotel_id' => $hotel->id,
+                    'plan_id' => $defaultPlan->id,
+                    'status' => 'active',
+                    'billing_cycle' => 'monthly',
+                    'currency' => 'USD',
+                    'price_paid' => $defaultPlan->price_monthly_usd,
+                    'starts_at' => now()->toDateString(),
+                    'expires_at' => now()->addMonths(1)->toDateString(),
+                    'notes' => 'اشتراك تلقائي مفعل من النظام',
+                ]);
+                $sub->load('plan');
+            }
+        }
+
+        $plan = $sub?->plan;
+        $roomsCount = $hotel->rooms()->count();
+        $maxRooms = $plan?->max_rooms ?? -1;
+        $daysRemaining = $sub ? $sub->days_remaining : 0;
+        $isExpiringSoon = $sub ? $sub->is_expiring_soon : false;
+        $isExpired = $sub ? $sub->is_expired : false;
+
+        $warningMessage = null;
+        if ($isExpired) {
+            $warningMessage = "⚠️ تنبيه هام: لقد انتهت صلاحية اشتراك الفندق بتاريخ {$sub?->expires_at?->format('Y-m-d')}. يرجى التجديد الفوري لتجنب انقطاع الخدمات.";
+        } elseif ($isExpiringSoon) {
+            $warningMessage = "⚠️ تنبيه: اشتراك الفندق ينتهي خلال {$daysRemaining} أيام (بتاريخ {$sub?->expires_at?->format('Y-m-d')}). يرجى تجديد الاشتراك.";
+        }
+
+        return response()->json([
+            'status' => 'success',
+            'subscription' => [
+                'plan_name' => $plan?->name ?? 'باقة قياسية',
+                'plan_slug' => $plan?->slug ?? 'standard',
+                'status' => $sub?->status ?? 'active',
+                'status_label' => $sub?->status_label ?? 'ساري',
+                'starts_at' => $sub?->starts_at?->format('Y-m-d'),
+                'expires_at' => $sub?->expires_at?->format('Y-m-d'),
+                'days_remaining' => $daysRemaining,
+                'is_expiring_soon' => $isExpiringSoon,
+                'is_expired' => $isExpired,
+                'warning_message' => $warningMessage,
+                'rooms_count' => $roomsCount,
+                'max_rooms' => $maxRooms,
+                'currency' => $sub?->currency ?? 'USD',
+                'price_paid' => $sub?->price_paid ?? 0,
+            ],
+        ]);
+    }
+
+    /**
+     * List support tickets for current hotel.
+     */
+    public function supportTickets(Request $request)
+    {
+        $user = $this->checkStaffAccess($request);
+        $tickets = \App\Models\SupportTicket::where('hotel_id', $user->hotel_id)
+            ->with(['creator', 'latestMessage'])
+            ->latest('updated_at')
+            ->get();
+
+        return response()->json([
+            'status' => 'success',
+            'tickets' => $tickets,
+            'data' => $tickets,
+        ]);
+    }
+
+    /**
+     * Store new support ticket from desktop/api.
+     */
+    public function storeSupportTicket(Request $request)
+    {
+        $user = $this->checkStaffAccess($request);
+        $validated = $request->validate([
+            'subject' => 'required|string|max:255',
+            'department' => 'required|in:technical,billing,sales,feature_request,general',
+            'priority' => 'required|in:low,medium,high,urgent',
+            'message' => 'required|string|max:5000',
+        ]);
+
+        $ticket = \App\Models\SupportTicket::create([
+            'hotel_id' => $user->hotel_id,
+            'user_id' => $user->id,
+            'subject' => $validated['subject'],
+            'department' => $validated['department'],
+            'priority' => $validated['priority'],
+            'status' => 'open',
+            'last_reply_at' => now(),
+        ]);
+
+        \App\Models\SupportTicketMessage::create([
+            'ticket_id' => $ticket->id,
+            'user_id' => $user->id,
+            'message' => $validated['message'],
+            'is_staff_reply' => false,
+        ]);
+
+        return response()->json([
+            'status' => 'success',
+            'message' => "تم فتح تذكرة الدعم الفني رقم {$ticket->ticket_number} بنجاح.",
+            'ticket' => $ticket->fresh()->load('messages.sender'),
+        ]);
+    }
+
+    /**
+     * Get ticket thread messages.
+     */
+    public function showSupportTicket(Request $request, $id)
+    {
+        $user = $this->checkStaffAccess($request);
+        $ticket = \App\Models\SupportTicket::where('hotel_id', $user->hotel_id)
+            ->with(['creator', 'messages.sender'])
+            ->findOrFail($id);
+
+        return response()->json([
+            'status' => 'success',
+            'ticket' => $ticket,
+        ]);
+    }
+
+    /**
+     * Reply to a support ticket from desktop/api.
+     */
+    public function replySupportTicket(Request $request, $id)
+    {
+        $user = $this->checkStaffAccess($request);
+        $ticket = \App\Models\SupportTicket::where('hotel_id', $user->hotel_id)->findOrFail($id);
+
+        $validated = $request->validate([
+            'message' => 'required|string|max:5000',
+        ]);
+
+        $msg = \App\Models\SupportTicketMessage::create([
+            'ticket_id' => $ticket->id,
+            'user_id' => $user->id,
+            'message' => $validated['message'],
+            'is_staff_reply' => false,
+        ]);
+
+        $ticket->update([
+            'status' => 'open',
+            'last_reply_at' => now(),
+        ]);
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'تم إرسال ردكم بنجاح.',
+            'reply' => $msg->load('sender'),
+            'ticket' => $ticket->fresh()->load('messages.sender'),
+        ]);
+    }
+}

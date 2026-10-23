@@ -124,6 +124,19 @@ Route::middleware(['auth', 'role:super_admin'])->prefix('platform')->name('platf
     Route::post('/security/threat-engine', [\App\Http\Controllers\Platform\SecurityDashboardController::class, 'updateThreatEngine'])->name('security.threat-engine');
     Route::post('/security/settings', [\App\Http\Controllers\Platform\SecurityDashboardController::class, 'updateSettings'])->name('security.settings');
     Route::post('/security/clear-logs', [\App\Http\Controllers\Platform\SecurityDashboardController::class, 'clearLogs'])->name('security.clear-logs');
+
+    // Platform Integrated CRM, Subscriptions & SaaS Operations
+    Route::get('/crm', [\App\Http\Controllers\Platform\CrmController::class, 'index'])->name('crm.index');
+    Route::post('/crm/plans', [\App\Http\Controllers\Platform\CrmController::class, 'storePlan'])->name('crm.plans.store');
+    Route::post('/crm/subscriptions/assign', [\App\Http\Controllers\Platform\CrmController::class, 'assignSubscription'])->name('crm.subscriptions.assign');
+    Route::post('/crm/invoices', [\App\Http\Controllers\Platform\CrmController::class, 'storeInvoice'])->name('crm.invoices.store');
+    Route::post('/crm/invoices/{invoice}/pay', [\App\Http\Controllers\Platform\CrmController::class, 'markInvoicePaid'])->name('crm.invoices.pay');
+    Route::get('/crm/tickets/{ticket}', [\App\Http\Controllers\Platform\CrmController::class, 'showTicket'])->name('crm.tickets.show');
+    Route::post('/crm/tickets/{ticket}/reply', [\App\Http\Controllers\Platform\CrmController::class, 'replyTicket'])->name('crm.tickets.reply');
+    Route::post('/crm/leads', [\App\Http\Controllers\Platform\CrmController::class, 'storeLead'])->name('crm.leads.store');
+    Route::put('/crm/leads/{lead}/status', [\App\Http\Controllers\Platform\CrmController::class, 'updateLeadStatus'])->name('crm.leads.status');
+    Route::post('/crm/campaigns', [\App\Http\Controllers\Platform\CrmController::class, 'storeCampaign'])->name('crm.campaigns.store');
+    Route::post('/crm/campaigns/{campaign}/toggle', [\App\Http\Controllers\Platform\CrmController::class, 'toggleCampaign'])->name('crm.campaigns.toggle');
 });
 
 // لوحة إدارة تطبيق الجوال (الوجهات والمحافظات، الإعلانات وبنرات أشهر الواجهات)
@@ -248,6 +261,16 @@ Route::middleware(['auth', 'role:hotel_admin,maintenance'])->prefix('dashboard/h
 Route::middleware(['auth', 'role:hotel_admin,cleaner'])->prefix('dashboard/hotel')->group(function () {
     Route::get('/cleaning', [HousekeepingController::class, 'index'])->name('cleaning.index');
     Route::post('/cleaning/{room}/complete', [HousekeepingController::class, 'clean'])->name('cleaning.complete');
+});
+
+Route::middleware(['auth', 'role:hotel_admin,reception,accountant,hotel_owner'])->prefix('dashboard/hotel')->group(function () {
+    // Hotel Customer Subscription & Plans
+    Route::get('/subscription', [\App\Http\Controllers\Admin\HotelSubscriptionController::class, 'index'])->name('admin.subscription.index');
+    Route::post('/subscription/request', [\App\Http\Controllers\Admin\HotelSubscriptionController::class, 'requestPlan'])->name('admin.subscription.request');
+
+    // Hotel Technical Support & Tickets
+    Route::resource('support', \App\Http\Controllers\Admin\HotelSupportController::class)->names('admin.support')->only(['index', 'create', 'store', 'show']);
+    Route::post('/support/{ticket}/reply', [\App\Http\Controllers\Admin\HotelSupportController::class, 'reply'])->name('admin.support.reply');
 });
 
 // التعامل مع أي روت أو عملية غير معرفة بالروت وتحويلها لصفحة تحذير مهذبة

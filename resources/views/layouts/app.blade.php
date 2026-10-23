@@ -712,6 +712,10 @@
                             <span>📊</span> {{ $isEn ? 'Platform Dashboard' : 'لوحة المنصة' }}
                         </a>
 
+                        <a href="{{ route('platform.crm.index') }}" class="nav-link-direct text-indigo-700 fw-bold">
+                            <span>💼</span> {{ $isEn ? 'Platform CRM' : 'نظام CRM والاشتراكات' }}
+                        </a>
+
                         @if(Auth::user()->hasPermission('hotels_create') || Auth::user()->hasPermission('hotels_edit') || Auth::user()->role === 'super_admin')
                             <div class="nav-item dropdown">
                                 <button class="nav-dropdown-btn" type="button" data-bs-toggle="dropdown" aria-expanded="false">
@@ -848,6 +852,24 @@
                                         <div>
                                             <span class="dropdown-item-title">{{ $isEn ? 'Comprehensive Reports' : 'التقارير الشاملة' }}</span>
                                             <span class="dropdown-item-desc">{{ $isEn ? 'Daily, monthly and annual reports' : 'تقارير الإيرادات والإشغال والصيانة' }}</span>
+                                        </div>
+                                    </a>
+                                </li>
+                                <li>
+                                    <a class="custom-dropdown-item" href="{{ route('admin.subscription.index') }}">
+                                        <span class="dropdown-item-icon bg-emerald-100 text-emerald-700">💳</span>
+                                        <div>
+                                            <span class="dropdown-item-title">{{ $isEn ? 'Hotel Subscription' : 'باقتي واشتراك الفندق' }}</span>
+                                            <span class="dropdown-item-desc">{{ $isEn ? 'Plan details, expiry & renewal' : 'تفاصيل الخطة، الصلاحية، وطلب التجديد' }}</span>
+                                        </div>
+                                    </a>
+                                </li>
+                                <li>
+                                    <a class="custom-dropdown-item" href="{{ route('admin.support.index') }}">
+                                        <span class="dropdown-item-icon bg-cyan-100 text-cyan-700">🎧</span>
+                                        <div>
+                                            <span class="dropdown-item-title">{{ $isEn ? 'Technical Support' : 'الدعم الفني والمساعدة' }}</span>
+                                            <span class="dropdown-item-desc">{{ $isEn ? 'Open and follow up support tickets' : 'فتح ومتابعة تذاكر الدعم الفني الفوري' }}</span>
                                         </div>
                                     </a>
                                 </li>

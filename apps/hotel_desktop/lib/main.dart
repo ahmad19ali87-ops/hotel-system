@@ -68,6 +68,14 @@ class AppState {
   static String? token;
   static Map<String, dynamic>? currentUser;
 
+  static String get serverBaseUrl {
+    final uri = Uri.tryParse(apiUrl);
+    if (uri != null && uri.hasScheme && uri.hasAuthority) {
+      return '${uri.scheme}://${uri.authority}';
+    }
+    return 'https://hotel.ahmadinsights.online';
+  }
+
   static File _getConfigFile() {
     try {
       final exeDir = File(Platform.resolvedExecutable).parent.path;
@@ -96,6 +104,48 @@ class AppState {
     try {
       final file = _getConfigFile();
       file.writeAsStringSync(apiUrl);
+    } catch (_) {}
+  }
+
+  static File _getCredentialsFile() {
+    try {
+      final exeDir = File(Platform.resolvedExecutable).parent.path;
+      return File('$exeDir/auth_credentials.json');
+    } catch (_) {
+      return File('auth_credentials.json');
+    }
+  }
+
+  static Map<String, dynamic>? loadSavedCredentials() {
+    try {
+      final file = _getCredentialsFile();
+      if (file.existsSync()) {
+        final content = file.readAsStringSync().trim();
+        if (content.isNotEmpty) {
+          final data = jsonDecode(content);
+          if (data is Map<String, dynamic>) {
+            return data;
+          }
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  static void saveCredentials(String email, String password, bool remember) {
+    try {
+      final file = _getCredentialsFile();
+      if (remember) {
+        file.writeAsStringSync(jsonEncode({
+          'email': email,
+          'password': password,
+          'remember_me': true,
+        }));
+      } else {
+        if (file.existsSync()) {
+          file.deleteSync();
+        }
+      }
     } catch (_) {}
   }
 
@@ -166,6 +216,18 @@ class _LoginScreenState extends State<LoginScreen> {
   final _passCtrl = TextEditingController(text: r'Ah70m10a65d55$');
   bool _isLoading = false;
   String? _errorMessage;
+  bool _rememberMe = true;
+
+  @override
+  void initState() {
+    super.initState();
+    final saved = AppState.loadSavedCredentials();
+    if (saved != null) {
+      if (saved['email'] != null) _emailCtrl.text = saved['email'];
+      if (saved['password'] != null) _passCtrl.text = saved['password'];
+      _rememberMe = saved['remember_me'] == true;
+    }
+  }
 
   Future<void> _submitLogin() async {
     final email = _emailCtrl.text.trim();
@@ -206,6 +268,7 @@ class _LoginScreenState extends State<LoginScreen> {
           return;
         }
 
+        AppState.saveCredentials(email, password, _rememberMe);
         widget.onLoginSuccess();
       } else {
         setState(() {
@@ -396,7 +459,8 @@ class _LoginScreenState extends State<LoginScreen> {
                       controller: _emailCtrl,
                       keyboardType: TextInputType.emailAddress,
                       decoration: InputDecoration(
-                        labelText: 'البريد الإلكتروني الوظيفي',
+                        labelText: 'ادخل الايميل',
+                        hintText: 'ادخل الايميل',
                         prefixIcon: const Icon(Icons.email_outlined),
                         border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
                         filled: true,
@@ -409,13 +473,31 @@ class _LoginScreenState extends State<LoginScreen> {
                       obscureText: true,
                       decoration: InputDecoration(
                         labelText: 'كلمة المرور',
+                        hintText: 'كلمة المرور',
                         prefixIcon: const Icon(Icons.lock_outline),
                         border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
                         filled: true,
                         fillColor: const Color(0xFFF8FAFC),
                       ),
                     ),
-                    const SizedBox(height: 24),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Checkbox(
+                          value: _rememberMe,
+                          activeColor: const Color(0xFF1D4ED8),
+                          onChanged: (val) {
+                            setState(() => _rememberMe = val ?? false);
+                          },
+                        ),
+                        const SizedBox(width: 4),
+                        const Text(
+                          'حفظ بياناتي',
+                          style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF334155)),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 18),
 
                     ElevatedButton(
                       onPressed: _isLoading ? null : _submitLogin,
@@ -509,6 +591,7 @@ class _MainDashboardScreenState extends State<MainDashboardScreen> {
   final ScrollController _overviewScrollController = ScrollController();
   bool _isLoading = true;
   Map<String, dynamic>? _dashboardData;
+  Map<String, dynamic>? _subscriptionData;
   int _unreadNotificationsCount = 0;
   Timer? _notificationsTimer;
 
@@ -517,6 +600,7 @@ class _MainDashboardScreenState extends State<MainDashboardScreen> {
     super.initState();
     _fetchDashboard();
     _fetchNotifications();
+    _fetchSubscription();
     // Start 15s notification polling timer for real-time alerts
     _notificationsTimer = Timer.periodic(const Duration(seconds: 15), (timer) {
       if (mounted) {
@@ -530,6 +614,40 @@ class _MainDashboardScreenState extends State<MainDashboardScreen> {
     _notificationsTimer?.cancel();
     _overviewScrollController.dispose();
     super.dispose();
+  }
+
+  Future<void> _fetchSubscription() async {
+    try {
+      final res = await http.get(
+        Uri.parse('${AppState.apiUrl}/staff/subscription'),
+        headers: {'Authorization': 'Bearer ${AppState.token}', 'Accept': 'application/json'},
+      );
+      if (res.statusCode == 200) {
+        final body = jsonDecode(res.body);
+        if (body['status'] == 'success' && mounted) {
+          setState(() {
+            _subscriptionData = body;
+          });
+        }
+      }
+    } catch (_) {}
+  }
+
+  void _openSubscriptionDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (ctx) => SubscriptionDetailsDialog(
+        subscriptionData: _subscriptionData,
+        onRefresh: _fetchSubscription,
+      ),
+    );
+  }
+
+  void _openSupportCenter(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (ctx) => const SupportCenterDialog(),
+    );
   }
 
   Future<void> _fetchDashboard() async {
@@ -949,6 +1067,90 @@ class _MainDashboardScreenState extends State<MainDashboardScreen> {
                             onPressed: () => _openScannerLookupDialog(context),
                           ),
                           const SizedBox(width: 8),
+                          // Support Tickets Button
+                          InkWell(
+                            onTap: () => _openSupportCenter(context),
+                            borderRadius: BorderRadius.circular(10),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFEFF6FF),
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(color: const Color(0xFFBFDBFE)),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: const [
+                                  Icon(Icons.headset_mic_rounded, color: Color(0xFF1D4ED8), size: 17),
+                                  SizedBox(width: 6),
+                                  Text(
+                                    'الدعم الفني 🎧',
+                                    style: TextStyle(color: Color(0xFF1D4ED8), fontSize: 12, fontWeight: FontWeight.bold),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+
+                          // Subscription Status Pill Badge
+                          if (_subscriptionData != null && _subscriptionData!['subscription'] != null) ...[
+                            InkWell(
+                              onTap: () => _openSubscriptionDialog(context),
+                              borderRadius: BorderRadius.circular(10),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                                decoration: BoxDecoration(
+                                  color: (_subscriptionData!['subscription']?['is_expired'] == true)
+                                      ? const Color(0xFFFEE2E2)
+                                      : (_subscriptionData!['subscription']?['is_expiring_soon'] == true)
+                                          ? const Color(0xFFFEF3C7)
+                                          : const Color(0xFFF0FDF4),
+                                  borderRadius: BorderRadius.circular(10),
+                                  border: Border.all(
+                                    color: (_subscriptionData!['subscription']?['is_expired'] == true)
+                                        ? const Color(0xFFFCA5A5)
+                                        : (_subscriptionData!['subscription']?['is_expiring_soon'] == true)
+                                            ? const Color(0xFFFCD34D)
+                                            : const Color(0xFF86EFAC),
+                                  ),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      (_subscriptionData!['subscription']?['is_expired'] == true)
+                                          ? Icons.warning_rounded
+                                          : (_subscriptionData!['subscription']?['is_expiring_soon'] == true)
+                                              ? Icons.timer_outlined
+                                              : Icons.verified_rounded,
+                                      color: (_subscriptionData!['subscription']?['is_expired'] == true)
+                                          ? const Color(0xFFDC2626)
+                                          : (_subscriptionData!['subscription']?['is_expiring_soon'] == true)
+                                              ? const Color(0xFFD97706)
+                                              : const Color(0xFF16A34A),
+                                      size: 17,
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      '${_subscriptionData!['subscription']?['plan_name'] ?? "الاشتراك"} • ${(_subscriptionData!['subscription']?['is_expired'] == true) ? "منتهي!" : "متبقي ${_subscriptionData!['subscription']?['remaining_days'] ?? 0} يوم"}',
+                                      style: TextStyle(
+                                        color: (_subscriptionData!['subscription']?['is_expired'] == true)
+                                            ? const Color(0xFFDC2626)
+                                            : (_subscriptionData!['subscription']?['is_expiring_soon'] == true)
+                                                ? const Color(0xFF92400E)
+                                                : const Color(0xFF166534),
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                          ],
+
                           // Interactive Notifications Center Button
                           InkWell(
                             onTap: () => _openNotificationsCenter(context),
@@ -1002,6 +1204,58 @@ class _MainDashboardScreenState extends State<MainDashboardScreen> {
                     ],
                   ),
                 ),
+
+                // Subscription Expiry Warning Banner
+                if (_subscriptionData != null &&
+                    _subscriptionData!['subscription'] != null &&
+                    (_subscriptionData!['subscription']?['is_expired'] == true ||
+                     _subscriptionData!['subscription']?['is_expiring_soon'] == true))
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: (_subscriptionData!['subscription']?['is_expired'] == true)
+                          ? const Color(0xFFDC2626)
+                          : const Color(0xFFD97706),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.1),
+                          blurRadius: 4,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          (_subscriptionData!['subscription']?['is_expired'] == true) ? Icons.error_outline : Icons.warning_amber_rounded,
+                          color: Colors.white,
+                          size: 20,
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            (_subscriptionData!['subscription']?['is_expired'] == true)
+                                ? '⚠️ تنبيه عاجل: لقد انتهت فترة اشتراك فندقكم في النظام (${_subscriptionData!['subscription']?['plan_name']}). يرجى التواصل مع إدارة النظام وتجديد الاشتراك فوراً لضمان عدم توقف الخدمات والمزامنة.'
+                                : '⚠️ تذكير بالاشتراك: اشتراككم في (${_subscriptionData!['subscription']?['plan_name']}) قارب على الانتهاء (متبقي ${_subscriptionData!['subscription']?['remaining_days']} يوماً فقط - تاريخ الانتهاء ${_subscriptionData!['subscription']?['end_date']}). يرجى المبادرة بالتجديد.',
+                            style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.white,
+                            foregroundColor: (_subscriptionData!['subscription']?['is_expired'] == true) ? const Color(0xFFDC2626) : const Color(0xFFD97706),
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                            elevation: 0,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                          ),
+                          onPressed: () => _openSubscriptionDialog(context),
+                          child: const Text('تفاصيل وتجديد الاشتراك', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                        ),
+                      ],
+                    ),
+                  ),
 
                 // Top Sub-Tabs Navigation (if category has sub-tabs)
                 if (activeCategory.subTabs.isNotEmpty)
@@ -3713,6 +3967,993 @@ class _BroadcastNotificationDialogState extends State<BroadcastNotificationDialo
 }
 
 // ============================================================================
+// SUBSCRIPTION & LICENSING DETAILS DIALOG
+// ============================================================================
+class SubscriptionDetailsDialog extends StatefulWidget {
+  final Map<String, dynamic>? subscriptionData;
+  final Future<void> Function() onRefresh;
+
+  const SubscriptionDetailsDialog({
+    super.key,
+    required this.subscriptionData,
+    required this.onRefresh,
+  });
+
+  @override
+  State<SubscriptionDetailsDialog> createState() => _SubscriptionDetailsDialogState();
+}
+
+class _SubscriptionDetailsDialogState extends State<SubscriptionDetailsDialog> {
+  bool _isLoading = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final sub = widget.subscriptionData?['subscription'] ?? {};
+    final hotel = widget.subscriptionData?['hotel'] ?? {};
+    final plans = (widget.subscriptionData?['plans'] as List?) ?? [];
+
+    final isExpired = sub['is_expired'] == true;
+    final isExpiringSoon = sub['is_expiring_soon'] == true;
+    final remainingDays = (sub['remaining_days'] is num) ? (sub['remaining_days'] as num).toInt() : 0;
+    final planName = sub['plan_name'] ?? 'الباقة القياسية';
+    final statusLabel = sub['status_label'] ?? (isExpired ? 'منتهي' : 'نشط');
+
+    return Directionality(
+      textDirection: TextDirection.rtl,
+      child: Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        insetPadding: const EdgeInsets.symmetric(horizontal: 40, vertical: 24),
+        child: Container(
+          width: 820,
+          constraints: const BoxConstraints(maxHeight: 700),
+          padding: const EdgeInsets.all(28),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Header
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFEFF6FF),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: const Color(0xFFBFDBFE)),
+                        ),
+                        child: const Icon(Icons.workspace_premium_rounded, color: Color(0xFF1D4ED8), size: 28),
+                      ),
+                      const SizedBox(width: 14),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'ترخيص واشتراك فندقك في النظام',
+                            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
+                          ),
+                          Text(
+                            'الفندق: ${hotel['name'] ?? ''} • رقم المنشأة: #${hotel['id'] ?? ''}',
+                            style: const TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                  IconButton(
+                    onPressed: () => Navigator.pop(context),
+                    icon: const Icon(Icons.close, color: Color(0xFF64748B)),
+                  ),
+                ],
+              ),
+              const Divider(height: 28),
+
+              Expanded(
+                child: SingleChildScrollView(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      // Status Banner
+                      if (isExpired)
+                        Container(
+                          padding: const EdgeInsets.all(14),
+                          margin: const EdgeInsets.only(bottom: 16),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFEE2E2),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: const Color(0xFFFCA5A5)),
+                          ),
+                          child: Row(
+                            children: const [
+                              Icon(Icons.error_outline, color: Color(0xFFDC2626), size: 24),
+                              SizedBox(width: 12),
+                              Expanded(
+                                child: Text(
+                                  'تحذير: انتهت صلاحية اشتراك فندقكم! يرجى تجديد الاشتراك فوراً أو التواصل مع الدعم الفني لاستمرار مزامنة البيانات.',
+                                  style: TextStyle(color: Color(0xFF991B1B), fontWeight: FontWeight.bold, fontSize: 13),
+                                ),
+                              ),
+                            ],
+                          ),
+                        )
+                      else if (isExpiringSoon)
+                        Container(
+                          padding: const EdgeInsets.all(14),
+                          margin: const EdgeInsets.only(bottom: 16),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFEF3C7),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: const Color(0xFFFCD34D)),
+                          ),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.warning_amber_rounded, color: Color(0xFFD97706), size: 24),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Text(
+                                  'تنبيه: اشتراككم قارب على الانتهاء! متبقي $remainingDays يوماً فقط. يرجى تجديد الاشتراك لضمان عدم انقطاع الخدمة.',
+                                  style: const TextStyle(color: Color(0xFF92400E), fontWeight: FontWeight.bold, fontSize: 13),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+
+                      // Current Subscription Card
+                      Container(
+                        padding: const EdgeInsets.all(20),
+                        decoration: BoxDecoration(
+                          gradient: const LinearGradient(
+                            colors: [Color(0xFF1E293B), Color(0xFF0F172A)],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          ),
+                          borderRadius: BorderRadius.circular(16),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.15),
+                              blurRadius: 10,
+                              offset: const Offset(0, 4),
+                            ),
+                          ],
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Row(
+                                  children: [
+                                    const Text('👑', style: TextStyle(fontSize: 24)),
+                                    const SizedBox(width: 10),
+                                    Text(
+                                      planName,
+                                      style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
+                                    ),
+                                  ],
+                                ),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                  decoration: BoxDecoration(
+                                    color: isExpired
+                                        ? const Color(0xFFDC2626)
+                                        : (isExpiringSoon ? const Color(0xFFD97706) : const Color(0xFF16A34A)),
+                                    borderRadius: BorderRadius.circular(20),
+                                  ),
+                                  child: Text(
+                                    statusLabel,
+                                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 18),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceAround,
+                              children: [
+                                _statItem('الأيام المتبقية', isExpired ? '0 يوم' : '$remainingDays يوم', Icons.calendar_today_rounded),
+                                _statItem('تاريخ البداية', sub['start_date'] ?? 'غير محدد', Icons.play_circle_outline),
+                                _statItem('تاريخ الانتهاء', sub['end_date'] ?? 'غير محدد', Icons.event_busy_rounded),
+                                _statItem('سعة الغرف', sub['max_rooms'] != null && sub['max_rooms'] > 0 ? '${sub['max_rooms']} غرفة' : 'غير محدود', Icons.hotel_rounded),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+
+                      // Available Plans for Upgrades
+                      const Text(
+                        'الباقات والخطط المتاحة في النظام:',
+                        style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
+                      ),
+                      const SizedBox(height: 12),
+                      Wrap(
+                        spacing: 12,
+                        runSpacing: 12,
+                        children: plans.map((p) {
+                          final isCurrent = p['name'] == planName;
+                          return Container(
+                            width: 240,
+                            padding: const EdgeInsets.all(16),
+                            decoration: BoxDecoration(
+                              color: isCurrent ? const Color(0xFFEFF6FF) : const Color(0xFFF8FAFC),
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(
+                                color: isCurrent ? const Color(0xFF1D4ED8) : const Color(0xFFE2E8F0),
+                                width: isCurrent ? 2 : 1,
+                              ),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Text(
+                                      p['name'] ?? '',
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 14,
+                                        color: isCurrent ? const Color(0xFF1D4ED8) : const Color(0xFF1E293B),
+                                      ),
+                                    ),
+                                    if (isCurrent)
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                        decoration: BoxDecoration(color: const Color(0xFF1D4ED8), borderRadius: BorderRadius.circular(6)),
+                                        child: const Text('باقتك الحالية', style: TextStyle(color: Colors.white, fontSize: 10)),
+                                      ),
+                                  ],
+                                ),
+                                const SizedBox(height: 8),
+                                Text(
+                                  '${p['price']} ${p['currency'] ?? "USD"} / ${p['billing_interval'] == "yearly" ? "سنوياً" : "شهرياً"}',
+                                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  '🚪 السعة: ${p['max_rooms'] != null && p['max_rooms'] > 0 ? "${p['max_rooms']} غرفة" : "غرف غير محدودة"}',
+                                  style: const TextStyle(fontSize: 12, color: Color(0xFF475569)),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  p['description'] ?? '',
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+                                ),
+                              ],
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 16),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  OutlinedButton.icon(
+                    onPressed: () async {
+                      setState(() => _isLoading = true);
+                      await widget.onRefresh();
+                      if (mounted) setState(() => _isLoading = false);
+                    },
+                    icon: _isLoading ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.refresh, size: 16),
+                    label: const Text('تحديث بيانات الترخيص'),
+                  ),
+                  Row(
+                    children: [
+                      ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF1D4ED8),
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        ),
+                        onPressed: () {
+                          Navigator.pop(context);
+                          showDialog(
+                            context: context,
+                            builder: (ctx) => const SupportCenterDialog(initialDepartment: 'billing'),
+                          );
+                        },
+                        icon: const Icon(Icons.support_agent_rounded, size: 18),
+                        label: const Text('طلب تجديد أو ترقية الاشتراك (تذكرة دعم)'),
+                      ),
+                      const SizedBox(width: 8),
+                      TextButton(
+                        onPressed: () => Navigator.pop(context),
+                        child: const Text('إغلاق'),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _statItem(String label, String value, IconData icon) {
+    return Column(
+      children: [
+        Icon(icon, color: const Color(0xFF93C5FD), size: 20),
+        const SizedBox(height: 6),
+        Text(value, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+        const SizedBox(height: 2),
+        Text(label, style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11)),
+      ],
+    );
+  }
+}
+
+// ============================================================================
+// TECHNICAL SUPPORT TICKETS SYSTEM DIALOG
+// ============================================================================
+class SupportCenterDialog extends StatefulWidget {
+  final String? initialDepartment;
+  const SupportCenterDialog({super.key, this.initialDepartment});
+
+  @override
+  State<SupportCenterDialog> createState() => _SupportCenterDialogState();
+}
+
+class _SupportCenterDialogState extends State<SupportCenterDialog> {
+  bool _isLoading = true;
+  List<dynamic> _tickets = [];
+  bool _isCreating = false;
+
+  final _subjectCtrl = TextEditingController();
+  final _messageCtrl = TextEditingController();
+  String _department = 'technical';
+  String _priority = 'medium';
+  bool _isSubmitting = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.initialDepartment != null) {
+      _department = widget.initialDepartment!;
+      _isCreating = true;
+    }
+    _fetchTickets();
+  }
+
+  Future<void> _fetchTickets() async {
+    setState(() => _isLoading = true);
+    try {
+      final res = await http.get(
+        Uri.parse('${AppState.apiUrl}/staff/support/tickets'),
+        headers: {'Authorization': 'Bearer ${AppState.token}', 'Accept': 'application/json'},
+      );
+      if (res.statusCode == 200) {
+        final body = jsonDecode(res.body);
+        setState(() {
+          _tickets = (body['data'] as List?) ?? [];
+        });
+      }
+    } catch (_) {}
+    if (mounted) setState(() => _isLoading = false);
+  }
+
+  Future<void> _submitNewTicket() async {
+    final sub = _subjectCtrl.text.trim();
+    final msg = _messageCtrl.text.trim();
+    if (sub.isEmpty || msg.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('يرجى كتابة عنوان التذكرة وتفاصيل الرسالة.')));
+      return;
+    }
+
+    setState(() => _isSubmitting = true);
+    try {
+      final res = await http.post(
+        Uri.parse('${AppState.apiUrl}/staff/support/tickets'),
+        headers: {
+          'Authorization': 'Bearer ${AppState.token}',
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: jsonEncode({
+          'subject': sub,
+          'department': _department,
+          'priority': _priority,
+          'message': msg,
+        }),
+      );
+
+      final body = jsonDecode(res.body);
+      if (res.statusCode == 200 && body['status'] == 'success') {
+        _subjectCtrl.clear();
+        _messageCtrl.clear();
+        setState(() => _isCreating = false);
+        _fetchTickets();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(body['message'] ?? 'تم إرسال التذكرة بنجاح!'),
+            backgroundColor: Colors.green,
+          ));
+        }
+      } else if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(body['message'] ?? 'فشل إرسال التذكرة.'),
+          backgroundColor: Colors.red,
+        ));
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('خطأ في الاتصال بالخادم.')));
+      }
+    }
+    if (mounted) setState(() => _isSubmitting = false);
+  }
+
+  void _openThread(int ticketId) {
+    showDialog(
+      context: context,
+      builder: (ctx) => SupportTicketThreadDialog(ticketId: ticketId),
+    ).then((_) => _fetchTickets());
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Directionality(
+      textDirection: TextDirection.rtl,
+      child: Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        insetPadding: const EdgeInsets.symmetric(horizontal: 40, vertical: 24),
+        child: Container(
+          width: 860,
+          constraints: const BoxConstraints(maxHeight: 720),
+          padding: const EdgeInsets.all(26),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Header
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFEFF6FF),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: const Color(0xFFBFDBFE)),
+                        ),
+                        child: const Icon(Icons.headset_mic_rounded, color: Color(0xFF1D4ED8), size: 26),
+                      ),
+                      const SizedBox(width: 14),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: const [
+                          Text(
+                            'مركز الدعم الفني وتذاكر المساعدة 🎧',
+                            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
+                          ),
+                          Text(
+                            'تواصل مباشر مع فريق إدارة النظام، الفوترة، والتطوير البرمجي',
+                            style: TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                  Row(
+                    children: [
+                      ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: _isCreating ? const Color(0xFF64748B) : const Color(0xFF1D4ED8),
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        ),
+                        onPressed: () => setState(() => _isCreating = !_isCreating),
+                        icon: Icon(_isCreating ? Icons.list_rounded : Icons.add_rounded, size: 18),
+                        label: Text(_isCreating ? 'عرض التذاكر السابقة' : 'فتح تذكرة جديدة'),
+                      ),
+                      const SizedBox(width: 8),
+                      IconButton(
+                        onPressed: () => Navigator.pop(context),
+                        icon: const Icon(Icons.close, color: Color(0xFF64748B)),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              const Divider(height: 24),
+
+              Expanded(
+                child: _isCreating ? _buildCreateForm() : _buildTicketsList(),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCreateForm() {
+    return SingleChildScrollView(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(12),
+            margin: const EdgeInsets.only(bottom: 16),
+            decoration: BoxDecoration(
+              color: const Color(0xFFEFF6FF),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: const Color(0xFFBFDBFE)),
+            ),
+            child: const Row(
+              children: [
+                Icon(Icons.info_outline, color: Color(0xFF1D4ED8), size: 20),
+                SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'قم بتعبئة النموذج وسيقوم فريق الدعم الفني بالرد المباشر عليك عبر النظام.',
+                    style: TextStyle(color: Color(0xFF1E40AF), fontSize: 12),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Row(
+            children: [
+              Expanded(
+                child: DropdownButtonFormField<String>(
+                  value: _department,
+                  decoration: InputDecoration(
+                    labelText: 'القسم المعني',
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  ),
+                  items: const [
+                    DropdownMenuItem(value: 'technical', child: Text('🛠️ الدعم الفني والتقني')),
+                    DropdownMenuItem(value: 'billing', child: Text('💳 الاشتراكات والفوترة')),
+                    DropdownMenuItem(value: 'sales', child: Text('💼 المبيعات والتراخيص')),
+                    DropdownMenuItem(value: 'feature_request', child: Text('💡 اقتراحات وميزات مطلوبة')),
+                    DropdownMenuItem(value: 'general', child: Text('❓ استفسار عام')),
+                  ],
+                  onChanged: (val) => setState(() => _department = val ?? 'technical'),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: DropdownButtonFormField<String>(
+                  value: _priority,
+                  decoration: InputDecoration(
+                    labelText: 'الأولوية والأهمية',
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  ),
+                  items: const [
+                    DropdownMenuItem(value: 'low', child: Text('🟢 عادي')),
+                    DropdownMenuItem(value: 'medium', child: Text('🟡 متوسط')),
+                    DropdownMenuItem(value: 'high', child: Text('🟠 عاجل ومهم')),
+                    DropdownMenuItem(value: 'urgent', child: Text('🔴 حرج جداً (توقف عمل)')),
+                  ],
+                  onChanged: (val) => setState(() => _priority = val ?? 'medium'),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          TextField(
+            controller: _subjectCtrl,
+            decoration: InputDecoration(
+              labelText: 'عنوان التذكرة أو المشكلة',
+              hintText: 'مثال: مشكلة في طباعة الفواتير الحرارية / استفسار عن تجديد الباقة',
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            ),
+          ),
+          const SizedBox(height: 14),
+          TextField(
+            controller: _messageCtrl,
+            maxLines: 5,
+            decoration: InputDecoration(
+              labelText: 'تفاصيل المشكلة أو الطلب',
+              hintText: 'اشرح المشكلة أو الاستفسار بالتفصيل هنا...',
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            ),
+          ),
+          const SizedBox(height: 20),
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF1D4ED8),
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            onPressed: _isSubmitting ? null : _submitNewTicket,
+            icon: _isSubmitting ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) : const Icon(Icons.send_rounded, size: 18),
+            label: const Text('إرسال تذكرة الدعم الفني', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTicketsList() {
+    if (_isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (_tickets.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.mark_email_read_outlined, size: 54, color: Color(0xFF94A3B8)),
+            const SizedBox(height: 12),
+            const Text('لا توجد تذاكر دعم فني مسجلة حتى الآن.', style: TextStyle(color: Color(0xFF64748B), fontSize: 14, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            ElevatedButton(
+              onPressed: () => setState(() => _isCreating = true),
+              child: const Text('فتح تذكرة الآن'),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return ListView.separated(
+      itemCount: _tickets.length,
+      separatorBuilder: (_, __) => const SizedBox(height: 10),
+      itemBuilder: (ctx, idx) {
+        final t = _tickets[idx];
+        final status = t['status'] ?? 'open';
+        final priority = t['priority'] ?? 'medium';
+
+        Color statusColor;
+        String statusText;
+        if (status == 'closed') {
+          statusColor = const Color(0xFF64748B);
+          statusText = 'مغلقة';
+        } else if (status == 'answered') {
+          statusColor = const Color(0xFF16A34A);
+          statusText = 'تم الرد من الدعم';
+        } else if (status == 'in_progress') {
+          statusColor = const Color(0xFFD97706);
+          statusText = 'جاري المعالجة';
+        } else {
+          statusColor = const Color(0xFF1D4ED8);
+          statusText = 'مفتوحة';
+        }
+
+        return Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: const Color(0xFFE2E8F0)),
+            boxShadow: [
+              BoxShadow(color: Colors.black.withValues(alpha: 0.02), blurRadius: 4, offset: const Offset(0, 2)),
+            ],
+          ),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: statusColor.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: statusColor.withValues(alpha: 0.3)),
+                ),
+                child: Text(
+                  statusText,
+                  style: TextStyle(color: statusColor, fontWeight: FontWeight.bold, fontSize: 11),
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Text(
+                          t['ticket_number'] ?? '#TICKET',
+                          style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF1D4ED8), fontSize: 12),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          '• الأولوية: ${_getPriorityLabel(priority)}',
+                          style: const TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          '• القسم: ${_getDepartmentLabel(t['department'])}',
+                          style: const TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      t['subject'] ?? '',
+                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'آخر تحديث: ${t['updated_at'] ?? ""}',
+                      style: const TextStyle(fontSize: 11, color: Color(0xFF94A3B8)),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 10),
+              ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFFF1F5F9),
+                  foregroundColor: const Color(0xFF1E293B),
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+                onPressed: () => _openThread(t['id']),
+                icon: const Icon(Icons.chat_bubble_outline_rounded, size: 16),
+                label: const Text('المحادثة والرد'),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  String _getPriorityLabel(String? p) {
+    switch (p) {
+      case 'urgent': return '🔴 حرج';
+      case 'high': return '🟠 عاجل';
+      case 'medium': return '🟡 متوسط';
+      default: return '🟢 عادي';
+    }
+  }
+
+  String _getDepartmentLabel(String? d) {
+    switch (d) {
+      case 'billing': return 'الاشتراكات والفوترة';
+      case 'sales': return 'المبيعات';
+      case 'feature_request': return 'اقتراحات ومميزات';
+      case 'general': return 'عام';
+      default: return 'الدعم الفني والتقني';
+    }
+  }
+}
+
+// ============================================================================
+// TICKET CONVERSATION THREAD DIALOG
+// ============================================================================
+class SupportTicketThreadDialog extends StatefulWidget {
+  final int ticketId;
+  const SupportTicketThreadDialog({super.key, required this.ticketId});
+
+  @override
+  State<SupportTicketThreadDialog> createState() => _SupportTicketThreadDialogState();
+}
+
+class _SupportTicketThreadDialogState extends State<SupportTicketThreadDialog> {
+  bool _isLoading = true;
+  Map<String, dynamic>? _ticket;
+  final _replyCtrl = TextEditingController();
+  bool _isSending = false;
+  final ScrollController _scrollCtrl = ScrollController();
+
+  @override
+  void initState() {
+    super.initState();
+    _fetch();
+  }
+
+  Future<void> _fetch() async {
+    setState(() => _isLoading = true);
+    try {
+      final res = await http.get(
+        Uri.parse('${AppState.apiUrl}/staff/support/tickets/${widget.ticketId}'),
+        headers: {'Authorization': 'Bearer ${AppState.token}', 'Accept': 'application/json'},
+      );
+      if (res.statusCode == 200) {
+        final body = jsonDecode(res.body);
+        setState(() {
+          _ticket = body['ticket'];
+        });
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (_scrollCtrl.hasClients) {
+            _scrollCtrl.jumpTo(_scrollCtrl.position.maxScrollExtent);
+          }
+        });
+      }
+    } catch (_) {}
+    if (mounted) setState(() => _isLoading = false);
+  }
+
+  Future<void> _sendReply() async {
+    final text = _replyCtrl.text.trim();
+    if (text.isEmpty) return;
+
+    setState(() => _isSending = true);
+    try {
+      final res = await http.post(
+        Uri.parse('${AppState.apiUrl}/staff/support/tickets/${widget.ticketId}/reply'),
+        headers: {
+          'Authorization': 'Bearer ${AppState.token}',
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: jsonEncode({'message': text}),
+      );
+
+      final body = jsonDecode(res.body);
+      if (res.statusCode == 200 && body['status'] == 'success') {
+        _replyCtrl.clear();
+        await _fetch();
+      } else if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(body['message'] ?? 'فشل إرسال الرد.')));
+      }
+    } catch (_) {}
+    if (mounted) setState(() => _isSending = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final messages = (_ticket?['messages'] as List?) ?? [];
+
+    return Directionality(
+      textDirection: TextDirection.rtl,
+      child: Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        insetPadding: const EdgeInsets.symmetric(horizontal: 40, vertical: 24),
+        child: Container(
+          width: 800,
+          constraints: const BoxConstraints(maxHeight: 700),
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Top Bar
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(color: const Color(0xFFEFF6FF), borderRadius: BorderRadius.circular(10)),
+                        child: const Icon(Icons.forum_rounded, color: Color(0xFF1D4ED8), size: 24),
+                      ),
+                      const SizedBox(width: 12),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            _ticket?['ticket_number'] ?? '#TICKET',
+                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Color(0xFF0F172A)),
+                          ),
+                          Text(
+                            _ticket?['subject'] ?? '',
+                            style: const TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                  IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.close)),
+                ],
+              ),
+              const Divider(height: 20),
+
+              // Messages
+              Expanded(
+                child: _isLoading
+                    ? const Center(child: CircularProgressIndicator())
+                    : ListView.builder(
+                        controller: _scrollCtrl,
+                        itemCount: messages.length,
+                        itemBuilder: (ctx, idx) {
+                          final m = messages[idx];
+                          final isSupportReply = m['is_staff_reply'] == true;
+                          final senderName = m['sender']?['name'] ?? (isSupportReply ? 'فريق الدعم الفني' : 'موظف الفندق');
+
+                          return Align(
+                            alignment: isSupportReply ? Alignment.centerRight : Alignment.centerLeft,
+                            child: Container(
+                              margin: const EdgeInsets.symmetric(vertical: 6),
+                              padding: const EdgeInsets.all(14),
+                              constraints: const BoxConstraints(maxWidth: 550),
+                              decoration: BoxDecoration(
+                                color: isSupportReply ? const Color(0xFFEFF6FF) : const Color(0xFFF1F5F9),
+                                borderRadius: BorderRadius.circular(14),
+                                border: Border.all(
+                                  color: isSupportReply ? const Color(0xFFBFDBFE) : const Color(0xFFCBD5E1),
+                                ),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        isSupportReply ? Icons.verified_user_rounded : Icons.person_rounded,
+                                        size: 15,
+                                        color: isSupportReply ? const Color(0xFF1D4ED8) : const Color(0xFF475569),
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Text(
+                                        senderName,
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 12,
+                                          color: isSupportReply ? const Color(0xFF1D4ED8) : const Color(0xFF334155),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Text(
+                                        m['created_at'] != null ? m['created_at'].toString().split('T').first : '',
+                                        style: const TextStyle(fontSize: 10, color: Color(0xFF94A3B8)),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    m['message'] ?? '',
+                                    style: const TextStyle(fontSize: 13, height: 1.4, color: Color(0xFF1E293B)),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+              ),
+
+              const SizedBox(height: 12),
+              // Reply Box
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _replyCtrl,
+                      decoration: InputDecoration(
+                        hintText: 'اكتب ردك على التذكرة هنا...',
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF1D4ED8),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    onPressed: _isSending ? null : _sendReply,
+                    icon: _isSending ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) : const Icon(Icons.send_rounded, size: 16),
+                    label: const Text('إرسال الرد'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================================
 // 2.1 INVOICE PRINT & THERMAL RECEIPT DIALOG (A4 & Thermal 80mm Preview)
 // ============================================================================
 class InvoicePrintReceiptDialog extends StatefulWidget {
@@ -3810,12 +5051,6 @@ class _InvoicePrintReceiptDialogState extends State<InvoicePrintReceiptDialog> {
     final dateStr = inv['paid_at'] ?? inv['created_at'] ?? DateTime.now().toString().substring(0, 16);
     final hotelName = AppState.currentUser?['hotel_name'] ?? 'فندق المحبة والضيافة';
     final cashier = AppState.currentUser?['name'] ?? 'موظف الاستقبال';
-    final hotelSlug = inv['hotel']?['slug'] ?? inv['hotel_slug'] ?? AppState.currentUser?['hotel_slug'] ?? 'hotel';
-    final invoiceId = inv['id'] ?? '';
-    final baseUrl = AppState.serverBaseUrl.isNotEmpty ? AppState.serverBaseUrl : 'https://hotel.ahmadinsights.online';
-    final publicUrl = '$baseUrl/$hotelSlug/invoices/$invoiceId';
-    final qrImgUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=140x140&margin=0&data=${Uri.encodeComponent(publicUrl)}';
-
     return Directionality(
       textDirection: TextDirection.rtl,
       child: AlertDialog(
@@ -4475,23 +5710,8 @@ class _CheckoutBookingDialogState extends State<CheckoutBookingDialog> {
 
                       final body = jsonDecode(res.body);
                       if (res.statusCode == 200 && mounted) {
-                        Navigator.pop(context);
                         widget.onComplete();
-
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text(body['message'] ?? 'تم تسجيل المغادرة، سداد الفاتورة، وترحيل الإيراد بنجاح.'),
-                            backgroundColor: Colors.green,
-                          ),
-                        );
-
-                        // Automatically open invoice receipt preview!
-                        if (body['invoice'] != null) {
-                          showDialog(
-                            context: context,
-                            builder: (ctx) => InvoicePrintReceiptDialog(invoice: body['invoice']),
-                          );
-                        }
+                        Navigator.pop(context, body);
                       } else if (mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
                           SnackBar(content: Text(body['message'] ?? 'فشل تسجيل المغادرة.'), backgroundColor: Colors.red),
@@ -5507,8 +6727,8 @@ class _RoomRackTabState extends State<RoomRackTab> {
                                 padding: const EdgeInsets.symmetric(vertical: 8),
                                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                               ),
-                              onPressed: () {
-                                showDialog(
+                              onPressed: () async {
+                                final res = await showDialog<Map<String, dynamic>?>(
                                   context: context,
                                   builder: (ctx) => CheckoutBookingDialog(
                                     booking: b,
@@ -5516,6 +6736,20 @@ class _RoomRackTabState extends State<RoomRackTab> {
                                     onComplete: _fetchRooms,
                                   ),
                                 );
+                                if (res != null && mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text(res['message'] ?? 'تم تسجيل المغادرة، سداد الفاتورة، وترحيل الإيراد بنجاح.'),
+                                      backgroundColor: Colors.green,
+                                    ),
+                                  );
+                                  if (res['invoice'] != null) {
+                                    showDialog(
+                                      context: context,
+                                      builder: (ctx) => InvoicePrintReceiptDialog(invoice: res['invoice']),
+                                    );
+                                  }
+                                }
                               },
                               icon: const Icon(Icons.logout, size: 14),
                               label: const Text('تسجيل مغادرة وسداد', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
@@ -6892,8 +8126,8 @@ class _BookingsTabState extends State<BookingsTab> {
                                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                               ),
-                              onPressed: () {
-                                showDialog(
+                              onPressed: () async {
+                                final res = await showDialog<Map<String, dynamic>?>(
                                   context: context,
                                   builder: (ctx) => CheckoutBookingDialog(
                                     booking: b,
@@ -6901,6 +8135,20 @@ class _BookingsTabState extends State<BookingsTab> {
                                     onComplete: () => _fetchBookings(),
                                   ),
                                 );
+                                if (res != null && mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text(res['message'] ?? 'تم تسجيل المغادرة، سداد الفاتورة، وترحيل الإيراد بنجاح.'),
+                                      backgroundColor: Colors.green,
+                                    ),
+                                  );
+                                  if (res['invoice'] != null) {
+                                    showDialog(
+                                      context: context,
+                                      builder: (ctx) => InvoicePrintReceiptDialog(invoice: res['invoice']),
+                                    );
+                                  }
+                                }
                               },
                               icon: const Icon(Icons.logout, size: 14),
                               label: const Text('تسجيل مغادرة وسداد (Check-out)', style: TextStyle(fontSize: 11)),

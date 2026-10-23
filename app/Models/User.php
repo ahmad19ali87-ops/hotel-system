@@ -250,4 +250,14 @@ class User extends Authenticatable
             ->where('is_read', false)
             ->count();
     }
+
+    public function supportTickets()
+    {
+        return $this->hasMany(SupportTicket::class, 'user_id');
+    }
+
+    public function assignedTickets()
+    {
+        return $this->hasMany(SupportTicket::class, 'assigned_to');
+    }
 }

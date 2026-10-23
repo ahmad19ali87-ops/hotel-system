@@ -144,6 +144,15 @@ Route::middleware('auth:sanctum')->group(function () {
         // Barcode & QR Scanner Lookup
         Route::get('/scanner/lookup', [StaffController::class, 'scannerLookup']);
 
+        // Hotel Subscription & Expiry Info (Desktop & Mobile)
+        Route::get('/subscription', [StaffController::class, 'subscriptionInfo']);
+
+        // Support Tickets System (Desktop & Mobile)
+        Route::get('/support/tickets', [StaffController::class, 'supportTickets']);
+        Route::post('/support/tickets', [StaffController::class, 'storeSupportTicket']);
+        Route::get('/support/tickets/{id}', [StaffController::class, 'showSupportTicket']);
+        Route::post('/support/tickets/{id}/reply', [StaffController::class, 'replySupportTicket']);
+
         // Staff Notifications Center
         Route::get('/notifications', [NotificationController::class, 'index']);
         Route::post('/notifications/read-all', [NotificationController::class, 'markAllRead']);

@@ -142,6 +142,48 @@ class Hotel extends Model
     {
         return $this->image_urls[0] ?? $this->logo_url;
     }
+
+    public function subscriptions()
+    {
+        return $this->hasMany(HotelSubscription::class, 'hotel_id')->latest('id');
+    }
+
+    public function currentSubscription()
+    {
+        return $this->hasOne(HotelSubscription::class, 'hotel_id')->latestOfMany();
+    }
+
+    public function subscriptionInvoices()
+    {
+        return $this->hasMany(SubscriptionInvoice::class, 'hotel_id')->latest('id');
+    }
+
+    public function supportTickets()
+    {
+        return $this->hasMany(SupportTicket::class, 'hotel_id')->latest('id');
+    }
+
+    /**
+     * Get active subscription or provision/fallback to default plan
+     */
+    public function getActiveSubscriptionAttribute(): ?HotelSubscription
+    {
+        $sub = $this->subscriptions()
+            ->with('plan')
+            ->whereIn('status', ['active', 'trial', 'grace_period'])
+            ->where(function ($q) {
+                $q->whereNull('expires_at')
+                  ->orWhere('expires_at', '>=', now()->toDateString());
+            })
+            ->first();
+
+        if ($sub) {
+            return $sub;
+        }
+
+        // Return latest subscription even if expired so we have its data
+        return $this->subscriptions()->with('plan')->first();
+    }
 }
 
 
