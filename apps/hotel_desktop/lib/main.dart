@@ -2,13 +2,36 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
 void main() {
-  WidgetsFlutterBinding.ensureInitialized();
-  AppState.loadSavedConfig();
-  runApp(const HotelDesktopApp());
+  runZonedGuarded(() {
+    WidgetsFlutterBinding.ensureInitialized();
+
+    // 1. Framework Error Handler
+    FlutterError.onError = (FlutterErrorDetails details) {
+      FlutterError.presentError(details);
+      debugPrint('Global Flutter Framework Error caught: ${details.exception}');
+    };
+
+    // 2. Custom ErrorWidget.builder - NEVER render a blank white screen!
+    ErrorWidget.builder = (FlutterErrorDetails details) {
+      return GlobalAppErrorView(details: details);
+    };
+
+    // 3. Platform Async Error Handler
+    PlatformDispatcher.instance.onError = (error, stack) {
+      debugPrint('Global PlatformDispatcher Error caught: $error\n$stack');
+      return true; // Mark as handled to prevent process crash
+    };
+
+    AppState.loadSavedConfig();
+    runApp(const HotelDesktopApp());
+  }, (error, stack) {
+    debugPrint('Global Zone Unhandled Error: $error\n$stack');
+  });
 }
 
 class AppLocale {
@@ -38,6 +61,7 @@ class HotelDesktopApp extends StatelessWidget {
       valueListenable: AppLocale.current,
       builder: (context, locale, child) {
         return MaterialApp(
+          navigatorKey: AppState.navigatorKey,
           title: AppLocale.tr('منظومة إدارة الفنادق الذكية - محطة العمل المتكاملة', 'Smart Hotel Management System - Workstation'),
           debugShowCheckedModeBanner: false,
           locale: Locale(locale),
@@ -62,7 +86,294 @@ class HotelDesktopApp extends StatelessWidget {
   }
 }
 
+// ============================================================================
+// GLOBAL APPLICATION ERROR & RECOVERY VIEW (يمنع الشاشة البيضاء ويعرض الخيارات)
+// ============================================================================
+class GlobalAppErrorView extends StatefulWidget {
+  final FlutterErrorDetails details;
+  const GlobalAppErrorView({super.key, required this.details});
+
+  @override
+  State<GlobalAppErrorView> createState() => _GlobalAppErrorViewState();
+}
+
+class _GlobalAppErrorViewState extends State<GlobalAppErrorView> {
+  bool _showDetails = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final errorStr = widget.details.exceptionAsString();
+    final stackStr = widget.details.stack?.toString() ?? '';
+
+    return Material(
+      color: const Color(0xFFF1F5F9),
+      child: Directionality(
+        textDirection: TextDirection.rtl,
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: Container(
+              constraints: const BoxConstraints(maxWidth: 640),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(20),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.08),
+                    blurRadius: 24,
+                    offset: const Offset(0, 8),
+                  ),
+                ],
+                border: Border.all(color: const Color(0xFFFECACA), width: 1.5),
+              ),
+              padding: const EdgeInsets.all(28),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFEE2E2),
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: const Icon(Icons.warning_amber_rounded, color: Color(0xFFDC2626), size: 34),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: const [
+                            Text(
+                              'تنبيه نظام: حدث استثناء غير متوقع في الواجهة',
+                              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17, color: Color(0xFF0F172A)),
+                            ),
+                            SizedBox(height: 4),
+                            Text(
+                              'تم اعتراض الخطأ بنجاح لحماية البرنامج من التجمد أو الشاشة البيضاء.',
+                              style: TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const Divider(height: 32),
+                  const Text(
+                    'تفاصيل الخطأ المسجل:',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF334155)),
+                  ),
+                  const SizedBox(height: 8),
+                  Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFFF1F2),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: const Color(0xFFFDA4AF)),
+                    ),
+                    child: SelectableText(
+                      errorStr,
+                      style: const TextStyle(fontSize: 12, fontFamily: 'monospace', color: Color(0xFF9F1239), height: 1.4),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  InkWell(
+                    onTap: () => setState(() => _showDetails = !_showDetails),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(_showDetails ? Icons.expand_less : Icons.expand_more, size: 18, color: const Color(0xFF1D4ED8)),
+                        const SizedBox(width: 4),
+                        Text(
+                          _showDetails ? 'إخفاء السجل التفصيلي (Stack Trace)' : 'عرض السجل التفصيلي (Stack Trace)',
+                          style: const TextStyle(fontSize: 12, color: Color(0xFF1D4ED8), fontWeight: FontWeight.bold),
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (_showDetails && stackStr.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Container(
+                      constraints: const BoxConstraints(maxHeight: 180),
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF0F172A),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: SingleChildScrollView(
+                        child: SelectableText(
+                          stackStr,
+                          style: const TextStyle(fontSize: 10, fontFamily: 'monospace', color: Color(0xFF94A3B8)),
+                        ),
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 24),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      TextButton.icon(
+                        style: TextButton.styleFrom(
+                          foregroundColor: const Color(0xFFDC2626),
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                        ),
+                        onPressed: () => exit(0),
+                        icon: const Icon(Icons.power_settings_new, size: 16),
+                        label: const Text('إغلاق البرنامج'),
+                      ),
+                      const SizedBox(width: 8),
+                      OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                        ),
+                        onPressed: () {
+                          // Wait / Retry
+                          setState(() {});
+                        },
+                        icon: const Icon(Icons.hourglass_empty, size: 16),
+                        label: const Text('انتظار / إعادة المحاولة'),
+                      ),
+                      const SizedBox(width: 8),
+                      ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF1D4ED8),
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+                        ),
+                        onPressed: () {
+                          // OK / Dismiss
+                          if (Navigator.canPop(context)) {
+                            Navigator.pop(context);
+                          } else {
+                            setState(() {});
+                          }
+                        },
+                        icon: const Icon(Icons.check, size: 16),
+                        label: const Text('موافق (متابعة)'),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class AppState {
+  static final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+
+  static String safeString(dynamic val, [String fallback = '']) {
+    if (val == null) return fallback;
+    if (val is String) return val.trim().isEmpty ? fallback : val;
+    if (val is Map) {
+      return val['name']?.toString() ?? val['title']?.toString() ?? val['label']?.toString() ?? fallback;
+    }
+    return val.toString();
+  }
+
+  static double safeDouble(dynamic val, [double fallback = 0.0]) {
+    if (val == null) return fallback;
+    if (val is num) return val.toDouble();
+    return double.tryParse(val.toString().replaceAll(',', '').trim()) ?? fallback;
+  }
+
+  static Map<String, dynamic> safeMap(dynamic val) {
+    if (val is Map<String, dynamic>) return val;
+    if (val is Map) return Map<String, dynamic>.from(val);
+    return <String, dynamic>{};
+  }
+
+  static Future<void> showGlobalErrorDialog({
+    required String title,
+    required String message,
+    VoidCallback? onRetry,
+  }) async {
+    final ctx = navigatorKey.currentContext;
+    if (ctx == null) return;
+    await showDialog(
+      context: ctx,
+      barrierDismissible: false,
+      builder: (dialogCtx) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFEE2E2),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(Icons.error_outline, color: Color(0xFFDC2626), size: 24),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  title,
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                ),
+              ),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'تم اعتراض التنبيه بنجاح لحماية البرنامج من التوقف أو ظهور شاشة بيضاء:',
+                style: TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+              ),
+              const SizedBox(height: 10),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF8FAFC),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: const Color(0xFFE2E8F0)),
+                ),
+                child: SelectableText(
+                  message,
+                  style: const TextStyle(fontSize: 12, fontFamily: 'monospace', color: Color(0xFF991B1B)),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton.icon(
+              onPressed: () => exit(0),
+              icon: const Icon(Icons.power_settings_new, color: Color(0xFFDC2626), size: 16),
+              label: const Text('إغلاق البرنامج', style: TextStyle(color: Color(0xFFDC2626))),
+            ),
+            OutlinedButton.icon(
+              onPressed: () {
+                Navigator.of(dialogCtx).pop();
+                if (onRetry != null) onRetry();
+              },
+              icon: const Icon(Icons.hourglass_empty, size: 16),
+              label: const Text('انتظار / إعادة المحاولة'),
+            ),
+            ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF1D4ED8),
+                foregroundColor: Colors.white,
+              ),
+              onPressed: () => Navigator.of(dialogCtx).pop(),
+              icon: const Icon(Icons.check, size: 16),
+              label: const Text('موافق (تخطي ومتابعة)'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
   static const String defaultApiUrl = 'https://hotel.ahmadinsights.online/api';
   static String apiUrl = defaultApiUrl;
   static String? token;
@@ -2366,7 +2677,7 @@ class NativePrintAndSaveService {
         'powershell',
         ['-NoProfile', '-Command', '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Get-Printer | Select-Object -ExpandProperty Name'],
         stdoutEncoding: utf8,
-      );
+      ).timeout(const Duration(seconds: 4));
       if (res.exitCode == 0) {
         final lines = (res.stdout as String)
             .split(RegExp(r'[\r\n]+'))
@@ -2418,7 +2729,7 @@ if (\$d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
         'powershell',
         ['-NoProfile', '-Command', psScript],
         stdoutEncoding: utf8,
-      );
+      ).timeout(const Duration(seconds: 45));
       if (res.exitCode == 0) {
         var path = (res.stdout as String).trim();
         if (path.isNotEmpty) {
@@ -2454,7 +2765,7 @@ if (\$d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
         await Process.run(
           browser,
           ['--headless=new', '--disable-gpu', '--no-pdf-header-footer', '--print-to-pdf=$targetPath', fileUri],
-        );
+        ).timeout(const Duration(seconds: 25));
       }
 
       // Verify file is created and has content
@@ -2535,41 +2846,52 @@ $htmlContent
             : '<!DOCTYPE html><html><head><meta charset="utf-8"><script>window.onload=function(){setTimeout(function(){window.print();},400);};</script></head><body>$htmlContent</body></html>';
         await tempHtmlFile.writeAsString(fallbackHtml, encoding: utf8);
         await Process.run('cmd', ['/c', 'start', '', tempHtmlFile.path]);
-      } catch (_) {}
+      } catch (err) {
+        rethrow;
+      }
     }
   }
 
   /// Build complete HTML for Invoice (Thermal 80mm or Standard A4)
-  static String buildInvoiceHtml(Map<String, dynamic> inv, String mode) {
-    final guestName = inv['booking']?['guest']?['name'] ?? inv['guest_name'] ?? 'نزيل محترم';
-    final guestPhone = inv['booking']?['guest']?['phone'] ?? inv['guest_phone'] ?? '—';
-    final roomNumber = inv['room']?['room_number'] ?? inv['room_number'] ?? (inv['booking']?['room']?['room_number']) ?? '—';
-    final roomType = inv['room']?['room_type'] ?? (inv['booking']?['room']?['room_type']) ?? 'غرفة فندقية';
-    final invoiceNum = inv['invoice_number'] ?? '#${inv['id'] ?? ''}';
-    final amount = inv['amount'] ?? 0;
-    final serviceAmount = inv['service_amount'] ?? 0;
-    final serviceDesc = inv['service_description'] ?? 'خدمات إضافية';
-    final tax = inv['tax'] ?? 0;
-    final total = inv['total'] ?? amount;
-    final currency = inv['currency'] ?? 'USD';
+  static String buildInvoiceHtml(Map<String, dynamic> rawInv, String mode) {
+    final inv = AppState.safeMap(rawInv);
+    final booking = AppState.safeMap(inv['booking']);
+    final guest = AppState.safeMap(booking['guest'] ?? inv['guest']);
+    final room = AppState.safeMap(inv['room'] ?? booking['room']);
+
+    final guestName = AppState.safeString(guest['name'] ?? inv['guest_name'], 'نزيل محترم');
+    final guestPhone = AppState.safeString(guest['phone'] ?? inv['guest_phone'], '—');
+    final roomNumber = AppState.safeString(room['room_number'] ?? inv['room_number'] ?? booking['room_number'], '—');
+    final roomType = AppState.safeString(
+      room['room_type'] ?? room['type'] ?? booking['room_type'] ?? inv['room_type'],
+      'غرفة فندقية'
+    );
+    final invoiceNum = AppState.safeString(inv['invoice_number'], '#${inv['id'] ?? '—'}');
+    final amount = AppState.safeDouble(inv['amount'] ?? booking['total_price']);
+    final serviceAmount = AppState.safeDouble(inv['service_amount']);
+    final serviceDesc = AppState.safeString(inv['service_description'], 'خدمات إضافية');
+    final tax = AppState.safeDouble(inv['tax']);
+    final total = AppState.safeDouble(inv['total'], amount + serviceAmount + tax);
+    final currency = AppState.safeString(inv['currency'] ?? booking['currency'], 'USD');
     final isPaid = inv['status'] == 'paid';
-    final dateStr = inv['paid_at'] ?? inv['created_at'] ?? DateTime.now().toString().substring(0, 16);
-    final hotelName = AppState.currentUser?['hotel_name'] ?? 'فندق المحبة والضيافة';
-    final cashier = AppState.currentUser?['name'] ?? 'موظف الاستقبال';
-    final hotelSlug = inv['hotel']?['slug'] ?? inv['hotel_slug'] ?? AppState.currentUser?['hotel_slug'] ?? 'hotel';
-    final invoiceId = inv['id'] ?? '';
+    final dateStr = AppState.safeString(inv['paid_at'] ?? inv['created_at'], DateTime.now().toString().substring(0, 16));
+    final hotelName = AppState.safeString(AppState.currentUser?['hotel_name'], 'فندق المحبة والضيافة');
+    final cashier = AppState.safeString(AppState.currentUser?['name'], 'موظف الاستقبال');
+
+    final hotelMap = AppState.safeMap(inv['hotel']);
+    final hotelSlug = AppState.safeString(hotelMap['slug'] ?? inv['hotel_slug'] ?? AppState.currentUser?['hotel_slug'], 'hotel');
+    final invoiceId = AppState.safeString(inv['id']);
     final baseUrl = AppState.serverBaseUrl.isNotEmpty ? AppState.serverBaseUrl : 'https://hotel.ahmadinsights.online';
     final publicUrl = '$baseUrl/$hotelSlug/invoices/$invoiceId';
     final qrImgUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=140x140&margin=0&data=${Uri.encodeComponent(publicUrl)}';
 
     String formatNum(dynamic v) {
-      if (v == null) return '0.00';
-      final num n = (v is num) ? v : (double.tryParse(v.toString()) ?? 0);
+      final n = AppState.safeDouble(v);
       return n.toStringAsFixed(2);
     }
 
-    final hasService = (serviceAmount is num ? serviceAmount : double.tryParse(serviceAmount.toString()) ?? 0) > 0;
-    final hasTax = (tax is num ? tax : double.tryParse(tax.toString()) ?? 0) > 0;
+    final hasService = serviceAmount > 0;
+    final hasTax = tax > 0;
 
     if (mode == 'thermal') {
       final thermalServiceRow = hasService ? '<div class="row"><span>خدمات ($serviceDesc):</span><span>${formatNum(serviceAmount)} $currency</span></div>' : '';
@@ -2979,54 +3301,79 @@ class _PrinterOptionsDialogState extends State<PrinterOptionsDialog> {
   }
 
   Future<void> _detectPrinters() async {
-    setState(() => _isLoadingPrinters = true);
-    final list = await NativePrintAndSaveService.getConnectedPrinters();
-    if (mounted) {
-      setState(() {
-        _printers = list;
-        _selectedPrinter = list.isNotEmpty ? list.first : 'طابعة النظام الافتراضية';
-        _isLoadingPrinters = false;
-      });
+    try {
+      setState(() => _isLoadingPrinters = true);
+      final list = await NativePrintAndSaveService.getConnectedPrinters();
+      if (mounted) {
+        setState(() {
+          _printers = list;
+          _selectedPrinter = list.isNotEmpty ? list.first : 'طابعة النظام الافتراضية';
+          _isLoadingPrinters = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _printers = ['طابعة النظام الافتراضية (Default Printer)', 'Microsoft Print to PDF'];
+          _selectedPrinter = _printers.first;
+          _isLoadingPrinters = false;
+        });
+      }
     }
   }
 
   Future<void> _printNow() async {
-    Navigator.pop(context);
-    await NativePrintAndSaveService.printWithNativeDialog(widget.htmlContent);
+    try {
+      Navigator.pop(context);
+      await NativePrintAndSaveService.printWithNativeDialog(widget.htmlContent);
+    } catch (e) {
+      AppState.showGlobalErrorDialog(
+        title: 'تنبيه أثناء إرسال أمر الطباعة',
+        message: 'حدث خطأ أثناء تشغيل نافذة الطباعة: $e',
+      );
+    }
   }
 
   Future<void> _savePdf() async {
-    setState(() => _isSaving = true);
-    final chosenPath = await NativePrintAndSaveService.showSaveFileDialog(
-      defaultFileName: widget.defaultFileName,
-      filter: 'ملف PDF (*.pdf)|*.pdf|ملف HTML (*.html)|*.html',
-    );
+    try {
+      setState(() => _isSaving = true);
+      final chosenPath = await NativePrintAndSaveService.showSaveFileDialog(
+        defaultFileName: widget.defaultFileName,
+        filter: 'ملف PDF (*.pdf)|*.pdf|ملف HTML (*.html)|*.html',
+      );
 
-    if (chosenPath != null && chosenPath.isNotEmpty) {
-      final success = await NativePrintAndSaveService.saveDocument(widget.htmlContent, chosenPath);
-      if (mounted) {
-        if (success) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('✓ تم حفظ المستند بنجاح في:\n$chosenPath'),
-              backgroundColor: const Color(0xFF059669),
-              duration: const Duration(seconds: 6),
-              action: SnackBarAction(
-                label: '📂 فتح الملف',
-                textColor: Colors.white,
-                onPressed: () => NativePrintAndSaveService.openFile(chosenPath),
+      if (chosenPath != null && chosenPath.isNotEmpty) {
+        final success = await NativePrintAndSaveService.saveDocument(widget.htmlContent, chosenPath);
+        if (mounted) {
+          if (success) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('✓ تم حفظ المستند بنجاح في:\n$chosenPath'),
+                backgroundColor: const Color(0xFF059669),
+                duration: const Duration(seconds: 6),
+                action: SnackBarAction(
+                  label: '📂 فتح الملف',
+                  textColor: Colors.white,
+                  onPressed: () => NativePrintAndSaveService.openFile(chosenPath),
+                ),
               ),
-            ),
-          );
-          Navigator.pop(context);
-        } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('تعذر حفظ الملف، يرجى التحقق من أذونات المجلد.'), backgroundColor: Color(0xFFDC2626)),
-          );
+            );
+            Navigator.pop(context);
+          } else {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('تعذر حفظ الملف، يرجى التحقق من أذونات المجلد.'), backgroundColor: Color(0xFFDC2626)),
+            );
+          }
         }
       }
+    } catch (e) {
+      AppState.showGlobalErrorDialog(
+        title: 'تنبيه أثناء حفظ الملف',
+        message: 'حدث خطأ أثناء حفظ الملف: $e',
+      );
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
     }
-    if (mounted) setState(() => _isSaving = false);
   }
 
   @override
@@ -4970,187 +5317,312 @@ class _InvoicePrintReceiptDialogState extends State<InvoicePrintReceiptDialog> {
 
   String _formatNumber(dynamic val) {
     if (val == null) return '0.00';
-    final num n = (val is num) ? val : (double.tryParse(val.toString()) ?? 0);
+    final num n = (val is num) ? val : (double.tryParse(val.toString().replaceAll(',', '').trim()) ?? 0);
     return n.toStringAsFixed(2).replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]},');
   }
 
   Future<void> _handlePrint(String mode) async {
-    final html = NativePrintAndSaveService.buildInvoiceHtml(widget.invoice, mode);
-    await NativePrintAndSaveService.printWithNativeDialog(html);
+    try {
+      final html = NativePrintAndSaveService.buildInvoiceHtml(widget.invoice, mode);
+      await NativePrintAndSaveService.printWithNativeDialog(html);
+    } catch (e) {
+      if (mounted) {
+        AppState.showGlobalErrorDialog(
+          title: 'تنبيه أثناء طباعة الفاتورة',
+          message: 'تعذر تشغيل نافذة الطباعة: $e\nيمكنك حفظ الفاتورة كملف PDF كخيار بديل ومضمون.',
+        );
+      }
+    }
   }
 
   Future<void> _handleSavePdf(String mode) async {
-    setState(() => _isSaving = true);
-    final inv = widget.invoice;
-    final invoiceNum = (inv['invoice_number'] ?? '#${inv['id'] ?? ''}').toString().replaceAll('#', '');
-    final defaultFileName = 'فاتورة_${invoiceNum}_${mode == 'thermal' ? 'حراري' : 'A4'}.pdf';
+    try {
+      setState(() => _isSaving = true);
+      final inv = AppState.safeMap(widget.invoice);
+      final invoiceNum = AppState.safeString(inv['invoice_number'], '#${inv['id'] ?? ''}').replaceAll('#', '');
+      final defaultFileName = 'فاتورة_${invoiceNum}_${mode == 'thermal' ? 'حراري' : 'A4'}.pdf';
 
-    final chosenPath = await NativePrintAndSaveService.showSaveFileDialog(
-      defaultFileName: defaultFileName,
-      filter: 'ملفات PDF (*.pdf)|*.pdf|ملفات HTML (*.html)|*.html|جميع الملفات (*.*)|*.*',
-    );
+      final chosenPath = await NativePrintAndSaveService.showSaveFileDialog(
+        defaultFileName: defaultFileName,
+        filter: 'ملفات PDF (*.pdf)|*.pdf|ملفات HTML (*.html)|*.html|جميع الملفات (*.*)|*.*',
+      );
 
-    if (chosenPath != null && chosenPath.isNotEmpty) {
-      final html = NativePrintAndSaveService.buildInvoiceHtml(inv, mode);
-      final success = await NativePrintAndSaveService.saveDocument(html, chosenPath);
-      if (mounted) {
-        if (success) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('✓ تم حفظ الفاتورة بنجاح في:\n$chosenPath'),
-              backgroundColor: const Color(0xFF059669),
-              duration: const Duration(seconds: 6),
-              action: SnackBarAction(
-                label: '📂 فتح الملف',
-                textColor: Colors.white,
-                onPressed: () => NativePrintAndSaveService.openFile(chosenPath),
+      if (chosenPath != null && chosenPath.isNotEmpty) {
+        final html = NativePrintAndSaveService.buildInvoiceHtml(inv, mode);
+        final success = await NativePrintAndSaveService.saveDocument(html, chosenPath);
+        if (mounted) {
+          if (success) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('✓ تم حفظ الفاتورة بنجاح في:\n$chosenPath'),
+                backgroundColor: const Color(0xFF059669),
+                duration: const Duration(seconds: 6),
+                action: SnackBarAction(
+                  label: '📂 فتح الملف',
+                  textColor: Colors.white,
+                  onPressed: () => NativePrintAndSaveService.openFile(chosenPath),
+                ),
               ),
-            ),
-          );
-        } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('تعذر حفظ الفاتورة، يرجى التحقق من أذونات المجلد.'), backgroundColor: Color(0xFFDC2626)),
-          );
+            );
+          } else {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('تعذر حفظ الفاتورة، يرجى التحقق من أذونات المجلد.'), backgroundColor: Color(0xFFDC2626)),
+            );
+          }
         }
       }
+    } catch (e) {
+      if (mounted) {
+        AppState.showGlobalErrorDialog(
+          title: 'تنبيه أثناء حفظ الفاتورة',
+          message: 'حدث خطأ أثناء حفظ الفاتورة: $e',
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
     }
-    if (mounted) setState(() => _isSaving = false);
   }
 
   void _openPrinterOptions() {
-    final inv = widget.invoice;
-    final invoiceNum = (inv['invoice_number'] ?? '#${inv['id'] ?? ''}').toString();
-    final html = NativePrintAndSaveService.buildInvoiceHtml(inv, _viewMode);
-    showDialog(
-      context: context,
-      builder: (ctx) => PrinterOptionsDialog(
-        title: 'إعدادات وخيارات الطباعة للفاتورة $invoiceNum',
-        documentType: 'invoice',
-        defaultFormat: _viewMode,
-        htmlContent: html,
-        defaultFileName: 'فاتورة_${invoiceNum.replaceAll('#', '')}.pdf',
-      ),
-    );
+    try {
+      final inv = AppState.safeMap(widget.invoice);
+      final invoiceNum = AppState.safeString(inv['invoice_number'], '#${inv['id'] ?? ''}');
+      final html = NativePrintAndSaveService.buildInvoiceHtml(inv, _viewMode);
+      showDialog(
+        context: context,
+        builder: (ctx) => PrinterOptionsDialog(
+          title: 'إعدادات وخيارات الطباعة للفاتورة $invoiceNum',
+          documentType: 'invoice',
+          defaultFormat: _viewMode,
+          htmlContent: html,
+          defaultFileName: 'فاتورة_${invoiceNum.replaceAll('#', '')}.pdf',
+        ),
+      );
+    } catch (e) {
+      AppState.showGlobalErrorDialog(
+        title: 'تنبيه في خيارات الطباعة',
+        message: 'تعذر فتح نافذة خيارات الطباعة: $e',
+      );
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final inv = widget.invoice;
-    final guestName = inv['booking']?['guest']?['name'] ?? inv['guest_name'] ?? 'نزيل محترم';
-    final guestPhone = inv['booking']?['guest']?['phone'] ?? inv['guest_phone'] ?? '—';
-    final roomNumber = inv['room']?['room_number'] ?? inv['room_number'] ?? (inv['booking']?['room']?['room_number']) ?? '—';
-    final roomType = inv['room']?['room_type'] ?? (inv['booking']?['room']?['room_type']) ?? 'غرفة فندقية';
-    final invoiceNum = inv['invoice_number'] ?? '#${inv['id'] ?? ''}';
-    final amount = inv['amount'] ?? 0;
-    final serviceAmount = inv['service_amount'] ?? 0;
-    final serviceDesc = inv['service_description'] ?? 'خدمات إضافية';
-    final tax = inv['tax'] ?? 0;
-    final total = inv['total'] ?? amount;
-    final currency = inv['currency'] ?? 'USD';
-    final isPaid = inv['status'] == 'paid';
-    final dateStr = inv['paid_at'] ?? inv['created_at'] ?? DateTime.now().toString().substring(0, 16);
-    final hotelName = AppState.currentUser?['hotel_name'] ?? 'فندق المحبة والضيافة';
-    final cashier = AppState.currentUser?['name'] ?? 'موظف الاستقبال';
-    return Directionality(
-      textDirection: TextDirection.rtl,
-      child: AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(color: const Color(0xFF1D4ED8).withValues(alpha: 0.1), borderRadius: BorderRadius.circular(10)),
-                  child: const Icon(Icons.print_outlined, color: Color(0xFF1D4ED8), size: 22),
-                ),
-                const SizedBox(width: 10),
-                Text('فاتورة وإيصال سداد رقم $invoiceNum', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-              ],
+    try {
+      final inv = AppState.safeMap(widget.invoice);
+      final booking = AppState.safeMap(inv['booking']);
+      final guest = AppState.safeMap(booking['guest'] ?? inv['guest']);
+      final room = AppState.safeMap(inv['room'] ?? booking['room']);
+
+      final guestName = AppState.safeString(guest['name'] ?? inv['guest_name'], 'نزيل محترم');
+      final guestPhone = AppState.safeString(guest['phone'] ?? inv['guest_phone'], '—');
+      final roomNumber = AppState.safeString(room['room_number'] ?? inv['room_number'] ?? booking['room_number'], '—');
+      final roomType = AppState.safeString(
+        room['room_type'] ?? room['type'] ?? booking['room_type'] ?? inv['room_type'],
+        'غرفة فندقية'
+      );
+      final invoiceNum = AppState.safeString(inv['invoice_number'], '#${inv['id'] ?? '—'}');
+      final amount = AppState.safeDouble(inv['amount'] ?? booking['total_price']);
+      final serviceAmount = AppState.safeDouble(inv['service_amount']);
+      final serviceDesc = AppState.safeString(inv['service_description'], 'خدمات إضافية');
+      final tax = AppState.safeDouble(inv['tax']);
+      final total = AppState.safeDouble(inv['total'], amount + serviceAmount + tax);
+      final currency = AppState.safeString(inv['currency'] ?? booking['currency'], 'USD');
+      final isPaid = inv['status'] == 'paid';
+      final dateStr = AppState.safeString(inv['paid_at'] ?? inv['created_at'], DateTime.now().toString().substring(0, 16));
+      final hotelName = AppState.safeString(AppState.currentUser?['hotel_name'], 'فندق المحبة والضيافة');
+      final cashier = AppState.safeString(AppState.currentUser?['name'], 'موظف الاستقبال');
+
+      return Directionality(
+        textDirection: TextDirection.rtl,
+        child: AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(color: const Color(0xFF1D4ED8).withValues(alpha: 0.1), borderRadius: BorderRadius.circular(10)),
+                    child: const Icon(Icons.print_outlined, color: Color(0xFF1D4ED8), size: 22),
+                  ),
+                  const SizedBox(width: 10),
+                  Text('فاتورة وإيصال سداد رقم $invoiceNum', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                ],
+              ),
+              Row(
+                children: [
+                  ChoiceChip(
+                    label: const Text('🧾 إيصال حراري 80mm'),
+                    selected: _viewMode == 'thermal',
+                    onSelected: (val) {
+                      if (val) setState(() => _viewMode = 'thermal');
+                    },
+                  ),
+                  const SizedBox(width: 8),
+                  ChoiceChip(
+                    label: const Text('📄 فاتورة رسمية A4'),
+                    selected: _viewMode == 'a4',
+                    onSelected: (val) {
+                      if (val) setState(() => _viewMode = 'a4');
+                    },
+                  ),
+                ],
+              ),
+            ],
+          ),
+          content: SizedBox(
+            width: _viewMode == 'thermal' ? 400 : 620,
+            child: SingleChildScrollView(
+              child: _viewMode == 'thermal'
+                  ? _buildThermalView(
+                      hotelName: hotelName,
+                      invoiceNum: invoiceNum,
+                      dateStr: dateStr,
+                      cashier: cashier,
+                      guestName: guestName,
+                      guestPhone: guestPhone,
+                      roomNumber: roomNumber,
+                      roomType: roomType,
+                      amount: amount,
+                      serviceAmount: serviceAmount,
+                      serviceDesc: serviceDesc,
+                      tax: tax,
+                      total: total,
+                      currency: currency,
+                      isPaid: isPaid,
+                    )
+                  : _buildA4View(
+                      hotelName: hotelName,
+                      invoiceNum: invoiceNum,
+                      dateStr: dateStr,
+                      cashier: cashier,
+                      guestName: guestName,
+                      guestPhone: guestPhone,
+                      roomNumber: roomNumber,
+                      roomType: roomType,
+                      amount: amount,
+                      serviceAmount: serviceAmount,
+                      serviceDesc: serviceDesc,
+                      tax: tax,
+                      total: total,
+                      currency: currency,
+                      isPaid: isPaid,
+                    ),
             ),
-            Row(
-              children: [
-                ChoiceChip(
-                  label: const Text('🧾 إيصال حراري 80mm'),
-                  selected: _viewMode == 'thermal',
-                  onSelected: (val) {
-                    if (val) setState(() => _viewMode = 'thermal');
-                  },
-                ),
-                const SizedBox(width: 8),
-                ChoiceChip(
-                  label: const Text('📄 فاتورة رسمية A4'),
-                  selected: _viewMode == 'a4',
-                  onSelected: (val) {
-                    if (val) setState(() => _viewMode = 'a4');
-                  },
-                ),
-              ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text('إغلاق')),
+            OutlinedButton.icon(
+              style: OutlinedButton.styleFrom(
+                foregroundColor: const Color(0xFF475569),
+                side: const BorderSide(color: Color(0xFFCBD5E1)),
+              ),
+              onPressed: _openPrinterOptions,
+              icon: const Icon(Icons.settings, size: 16),
+              label: const Text('⚙️ خيارات الطابعة'),
+            ),
+            OutlinedButton.icon(
+              style: OutlinedButton.styleFrom(
+                foregroundColor: const Color(0xFF1D4ED8),
+                side: const BorderSide(color: Color(0xFF1D4ED8)),
+              ),
+              onPressed: _isSaving ? null : () => _handleSavePdf(_viewMode),
+              icon: _isSaving
+                  ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Icon(Icons.save_alt, size: 16),
+              label: const Text('💾 حفظ PDF (اختيار المكان)'),
+            ),
+            ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF059669),
+                foregroundColor: Colors.white,
+              ),
+              onPressed: () => _handlePrint(_viewMode),
+              icon: const Icon(Icons.print, size: 16),
+              label: Text(_viewMode == 'thermal' ? '🖨️ طباعة حرارية (نافذة الطابعات)' : '🖨️ طباعة A4 (نافذة الطابعات)'),
             ),
           ],
         ),
-        content: SizedBox(
-          width: _viewMode == 'thermal' ? 400 : 620,
-          child: SingleChildScrollView(
-            child: _viewMode == 'thermal'
-                ? _buildThermalView(hotelName, invoiceNum, dateStr, cashier, guestName, guestPhone, roomNumber, roomType, amount, serviceAmount, serviceDesc, tax, total, currency, isPaid)
-                : _buildA4View(hotelName, invoiceNum, dateStr, cashier, guestName, guestPhone, roomNumber, roomType, amount, serviceAmount, serviceDesc, tax, total, currency, isPaid),
+      );
+    } catch (e, stack) {
+      debugPrint('Error building InvoicePrintReceiptDialog: $e\n$stack');
+      return Directionality(
+        textDirection: TextDirection.rtl,
+        child: AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Row(
+            children: const [
+              Icon(Icons.warning_amber_rounded, color: Colors.orange, size: 28),
+              SizedBox(width: 8),
+              Text('تنبيه في تجهيز الفاتورة', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+            ],
           ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('تم اعتراض خطأ أثناء تجهيز بيانات الفاتورة لمنع ظهور شاشة بيضاء:'),
+              const SizedBox(height: 8),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(color: const Color(0xFFF1F5F9), borderRadius: BorderRadius.circular(8)),
+                child: SelectableText(e.toString(), style: const TextStyle(fontSize: 11, fontFamily: 'monospace', color: Colors.red)),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => exit(0),
+              child: const Text('إغلاق البرنامج', style: TextStyle(color: Colors.red)),
+            ),
+            OutlinedButton(
+              onPressed: () => setState(() {}),
+              child: const Text('انتظار / إعادة المحاولة'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('موافق (إغلاق الفاتورة)'),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('إغلاق')),
-          OutlinedButton.icon(
-            style: OutlinedButton.styleFrom(
-              foregroundColor: const Color(0xFF475569),
-              side: const BorderSide(color: Color(0xFFCBD5E1)),
-            ),
-            onPressed: _openPrinterOptions,
-            icon: const Icon(Icons.settings, size: 16),
-            label: const Text('⚙️ خيارات الطابعة'),
-          ),
-          OutlinedButton.icon(
-            style: OutlinedButton.styleFrom(
-              foregroundColor: const Color(0xFF1D4ED8),
-              side: const BorderSide(color: Color(0xFF1D4ED8)),
-            ),
-            onPressed: _isSaving ? null : () => _handleSavePdf(_viewMode),
-            icon: _isSaving
-                ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
-                : const Icon(Icons.save_alt, size: 16),
-            label: const Text('💾 حفظ PDF (اختيار المكان)'),
-          ),
-          ElevatedButton.icon(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF059669),
-              foregroundColor: Colors.white,
-            ),
-            onPressed: () => _handlePrint(_viewMode),
-            icon: const Icon(Icons.print, size: 16),
-            label: Text(_viewMode == 'thermal' ? '🖨️ طباعة حرارية (نافذة الطابعات)' : '🖨️ طباعة A4 (نافذة الطابعات)'),
-          ),
-        ],
-      ),
-    );
+      );
+    }
   }
 
-  Widget _buildThermalView(
-    String hotelName,
-    String invoiceNum,
-    String dateStr,
-    String cashier,
-    String guestName,
-    String guestPhone,
-    String roomNumber,
-    String roomType,
-    dynamic amount,
-    dynamic serviceAmount,
-    String serviceDesc,
-    dynamic tax,
-    dynamic total,
-    String currency,
-    bool isPaid,
-  ) {
+  Widget _buildThermalView({
+    required dynamic hotelName,
+    required dynamic invoiceNum,
+    required dynamic dateStr,
+    required dynamic cashier,
+    required dynamic guestName,
+    required dynamic guestPhone,
+    required dynamic roomNumber,
+    required dynamic roomType,
+    required dynamic amount,
+    required dynamic serviceAmount,
+    required dynamic serviceDesc,
+    required dynamic tax,
+    required dynamic total,
+    required dynamic currency,
+    required dynamic isPaid,
+  }) {
+    final strHotelName = AppState.safeString(hotelName);
+    final strInvoiceNum = AppState.safeString(invoiceNum);
+    final strDate = AppState.safeString(dateStr);
+    final strCashier = AppState.safeString(cashier);
+    final strGuestName = AppState.safeString(guestName);
+    final strGuestPhone = AppState.safeString(guestPhone);
+    final strRoomNum = AppState.safeString(roomNumber);
+    final strRoomType = AppState.safeString(roomType);
+    final strCurrency = AppState.safeString(currency, 'USD');
+    final strServiceDesc = AppState.safeString(serviceDesc, 'خدمات');
+    final numService = AppState.safeDouble(serviceAmount);
+    final numTax = AppState.safeDouble(tax);
+    final boolPaid = isPaid == true;
+
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -5166,48 +5638,48 @@ class _InvoicePrintReceiptDialogState extends State<InvoicePrintReceiptDialog> {
               children: [
                 const Text('🏨', style: TextStyle(fontSize: 28)),
                 const SizedBox(height: 4),
-                Text(hotelName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Color(0xFF0F172A))),
+                Text(strHotelName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Color(0xFF0F172A))),
                 const Text('إيصال سداد إقامة وخدمات فندقية', style: TextStyle(fontSize: 12, color: Color(0xFF64748B))),
                 const Text('------------------------------------------------', style: TextStyle(color: Color(0xFF94A3B8))),
               ],
             ),
           ),
           const SizedBox(height: 6),
-          _thermalRow('رقم الفاتورة:', invoiceNum, isBold: true),
-          _thermalRow('التاريخ والوقت:', dateStr),
-          _thermalRow('الكاشير / الموظف:', cashier),
+          _thermalRow('رقم الفاتورة:', strInvoiceNum, isBold: true),
+          _thermalRow('التاريخ والوقت:', strDate),
+          _thermalRow('الكاشير / الموظف:', strCashier),
           const Text('------------------------------------------------', style: TextStyle(color: Color(0xFF94A3B8))),
-          _thermalRow('النزيل:', guestName, isBold: true),
-          _thermalRow('هاتف النزيل:', guestPhone),
-          _thermalRow('الغرفة:', 'غرفة $roomNumber ($roomType)'),
+          _thermalRow('النزيل:', strGuestName, isBold: true),
+          _thermalRow('هاتف النزيل:', strGuestPhone),
+          _thermalRow('الغرفة:', 'غرفة $strRoomNum ($strRoomType)'),
           const Text('------------------------------------------------', style: TextStyle(color: Color(0xFF94A3B8))),
           const Text('تفاصيل الحساب والخدمات:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF334155))),
           const SizedBox(height: 6),
-          _thermalRow('أجرة الإقامة الأساسية:', '${_formatNumber(amount)} $currency'),
-          if ((serviceAmount is num ? serviceAmount : double.tryParse(serviceAmount.toString()) ?? 0) > 0)
-            _thermalRow('خدمات إضافية ($serviceDesc):', '${_formatNumber(serviceAmount)} $currency'),
-          if ((tax is num ? tax : double.tryParse(tax.toString()) ?? 0) > 0)
-            _thermalRow('الضريبة والرسوم:', '${_formatNumber(tax)} $currency'),
+          _thermalRow('أجرة الإقامة الأساسية:', '${_formatNumber(amount)} $strCurrency'),
+          if (numService > 0)
+            _thermalRow('خدمات إضافية ($strServiceDesc):', '${_formatNumber(numService)} $strCurrency'),
+          if (numTax > 0)
+            _thermalRow('الضريبة والرسوم:', '${_formatNumber(numTax)} $strCurrency'),
           const Text('================================================', style: TextStyle(color: Color(0xFF0F172A), fontWeight: FontWeight.bold)),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               const Text('الإجمالي النهائي المسدد:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-              Text('${_formatNumber(total)} $currency', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Color(0xFF059669))),
+              Text('${_formatNumber(total)} $strCurrency', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Color(0xFF059669))),
             ],
           ),
           const SizedBox(height: 8),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
             decoration: BoxDecoration(
-              color: isPaid ? const Color(0xFFDCFCE7) : const Color(0xFFFEE2E2),
+              color: boolPaid ? const Color(0xFFDCFCE7) : const Color(0xFFFEE2E2),
               borderRadius: BorderRadius.circular(8),
             ),
             child: Center(
               child: Text(
-                isPaid ? '✓ تم السداد بالكامل (Paid in Full)' : '⚠️ غير مسددة (Unpaid)',
+                boolPaid ? '✓ تم السداد بالكامل (Paid in Full)' : '⚠️ غير مسددة (Unpaid)',
                 style: TextStyle(
-                  color: isPaid ? const Color(0xFF166534) : const Color(0xFFDC2626),
+                  color: boolPaid ? const Color(0xFF166534) : const Color(0xFFDC2626),
                   fontWeight: FontWeight.bold,
                   fontSize: 12,
                 ),
@@ -5240,7 +5712,7 @@ class _InvoicePrintReceiptDialogState extends State<InvoicePrintReceiptDialog> {
                   ),
                 ),
                 const SizedBox(height: 4),
-                Text(invoiceNum, style: const TextStyle(fontSize: 10, fontFamily: 'monospace', letterSpacing: 2)),
+                Text(strInvoiceNum, style: const TextStyle(fontSize: 10, fontFamily: 'monospace', letterSpacing: 2)),
               ],
             ),
           ),
@@ -5257,36 +5729,58 @@ class _InvoicePrintReceiptDialogState extends State<InvoicePrintReceiptDialog> {
     );
   }
 
-  Widget _thermalRow(String title, String value, {bool isBold = false}) {
+  Widget _thermalRow(String title, dynamic value, {bool isBold = false}) {
+    final strVal = AppState.safeString(value);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 3),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Text(title, style: TextStyle(fontSize: 12, color: const Color(0xFF475569), fontWeight: isBold ? FontWeight.bold : FontWeight.normal)),
-          Text(value, style: TextStyle(fontSize: 12, color: const Color(0xFF0F172A), fontWeight: isBold ? FontWeight.bold : FontWeight.w500)),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              strVal,
+              textAlign: TextAlign.left,
+              style: TextStyle(fontSize: 12, color: const Color(0xFF0F172A), fontWeight: isBold ? FontWeight.bold : FontWeight.w500),
+            ),
+          ),
         ],
       ),
     );
   }
 
-  Widget _buildA4View(
-    String hotelName,
-    String invoiceNum,
-    String dateStr,
-    String cashier,
-    String guestName,
-    String guestPhone,
-    String roomNumber,
-    String roomType,
-    dynamic amount,
-    dynamic serviceAmount,
-    String serviceDesc,
-    dynamic tax,
-    dynamic total,
-    String currency,
-    bool isPaid,
-  ) {
+  Widget _buildA4View({
+    required dynamic hotelName,
+    required dynamic invoiceNum,
+    required dynamic dateStr,
+    required dynamic cashier,
+    required dynamic guestName,
+    required dynamic guestPhone,
+    required dynamic roomNumber,
+    required dynamic roomType,
+    required dynamic amount,
+    required dynamic serviceAmount,
+    required dynamic serviceDesc,
+    required dynamic tax,
+    required dynamic total,
+    required dynamic currency,
+    required dynamic isPaid,
+  }) {
+    final strHotelName = AppState.safeString(hotelName);
+    final strInvoiceNum = AppState.safeString(invoiceNum);
+    final strDate = AppState.safeString(dateStr);
+    final strCashier = AppState.safeString(cashier);
+    final strGuestName = AppState.safeString(guestName);
+    final strGuestPhone = AppState.safeString(guestPhone);
+    final strRoomNum = AppState.safeString(roomNumber);
+    final strRoomType = AppState.safeString(roomType);
+    final strCurrency = AppState.safeString(currency, 'USD');
+    final strServiceDesc = AppState.safeString(serviceDesc, 'خدمات فندقية');
+    final numService = AppState.safeDouble(serviceAmount);
+    final numTax = AppState.safeDouble(tax);
+    final boolPaid = isPaid == true;
+
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
@@ -5303,21 +5797,21 @@ class _InvoicePrintReceiptDialogState extends State<InvoicePrintReceiptDialog> {
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(hotelName, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF1D4ED8))),
+                  Text(strHotelName, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF1D4ED8))),
                   const Text('نظام الإدارة الفندقية المتكامل - الفاتورة الضريبية', style: TextStyle(fontSize: 11, color: Color(0xFF64748B))),
-                  Text('المصدر / المحاسب: $cashier', style: const TextStyle(fontSize: 11, color: Color(0xFF64748B))),
+                  Text('المصدر / المحاسب: $strCashier', style: const TextStyle(fontSize: 11, color: Color(0xFF64748B))),
                 ],
               ),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                 decoration: BoxDecoration(
-                  color: isPaid ? const Color(0xFFDCFCE7) : const Color(0xFFFEE2E2),
+                  color: boolPaid ? const Color(0xFFDCFCE7) : const Color(0xFFFEE2E2),
                   borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: isPaid ? const Color(0xFF86EFAC) : const Color(0xFFFCA5A5)),
+                  border: Border.all(color: boolPaid ? const Color(0xFF86EFAC) : const Color(0xFFFCA5A5)),
                 ),
                 child: Text(
-                  isPaid ? 'مدفوعة بالكامل ✓' : 'غير مسددة',
-                  style: TextStyle(color: isPaid ? const Color(0xFF166534) : const Color(0xFFDC2626), fontWeight: FontWeight.bold, fontSize: 13),
+                  boolPaid ? 'مدفوعة بالكامل ✓' : 'غير مسددة',
+                  style: TextStyle(color: boolPaid ? const Color(0xFF166534) : const Color(0xFFDC2626), fontWeight: FontWeight.bold, fontSize: 13),
                 ),
               ),
             ],
@@ -5331,8 +5825,8 @@ class _InvoicePrintReceiptDialogState extends State<InvoicePrintReceiptDialog> {
                   children: [
                     const Text('بيانات النزيل المستفيد:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF475569))),
                     const SizedBox(height: 4),
-                    Text('الاسم: $guestName', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                    Text('الهاتف: $guestPhone', style: const TextStyle(fontSize: 12, color: Color(0xFF64748B))),
+                    Text('الاسم: $strGuestName', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                    Text('الهاتف: $strGuestPhone', style: const TextStyle(fontSize: 12, color: Color(0xFF64748B))),
                   ],
                 ),
               ),
@@ -5342,9 +5836,9 @@ class _InvoicePrintReceiptDialogState extends State<InvoicePrintReceiptDialog> {
                   children: [
                     const Text('بيانات الفاتورة والحجز:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF475569))),
                     const SizedBox(height: 4),
-                    Text('رقم الفاتورة: $invoiceNum', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                    Text('الغرفة: غرفة $roomNumber ($roomType)', style: const TextStyle(fontSize: 12, color: Color(0xFF64748B))),
-                    Text('تاريخ الإصدار: $dateStr', style: const TextStyle(fontSize: 12, color: Color(0xFF64748B))),
+                    Text('رقم الفاتورة: $strInvoiceNum', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                    Text('الغرفة: غرفة $strRoomNum ($strRoomType)', style: const TextStyle(fontSize: 12, color: Color(0xFF64748B))),
+                    Text('تاريخ الإصدار: $strDate', style: const TextStyle(fontSize: 12, color: Color(0xFF64748B))),
                   ],
                 ),
               ),
@@ -5371,19 +5865,28 @@ class _InvoicePrintReceiptDialogState extends State<InvoicePrintReceiptDialog> {
               ),
               TableRow(
                 children: [
-                  Padding(padding: const EdgeInsets.all(8), child: Text('إقامة فندقية - غرفة $roomNumber ($roomType)', style: const TextStyle(fontSize: 12))),
+                  Padding(padding: const EdgeInsets.all(8), child: Text('إقامة فندقية - غرفة $strRoomNum ($strRoomType)', style: const TextStyle(fontSize: 12))),
                   const Padding(padding: EdgeInsets.all(8), child: Text('1', style: TextStyle(fontSize: 12))),
-                  Padding(padding: const EdgeInsets.all(8), child: Text('${_formatNumber(amount)} $currency', style: const TextStyle(fontSize: 12))),
-                  Padding(padding: const EdgeInsets.all(8), child: Text('${_formatNumber(amount)} $currency', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold))),
+                  Padding(padding: const EdgeInsets.all(8), child: Text('${_formatNumber(amount)} $strCurrency', style: const TextStyle(fontSize: 12))),
+                  Padding(padding: const EdgeInsets.all(8), child: Text('${_formatNumber(amount)} $strCurrency', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold))),
                 ],
               ),
-              if ((serviceAmount is num ? serviceAmount : double.tryParse(serviceAmount.toString()) ?? 0) > 0)
+              if (numService > 0)
                 TableRow(
                   children: [
-                    Padding(padding: const EdgeInsets.all(8), child: Text('خدمات فندقية إضافية: $serviceDesc', style: const TextStyle(fontSize: 12))),
+                    Padding(padding: const EdgeInsets.all(8), child: Text('خدمات فندقية إضافية: $strServiceDesc', style: const TextStyle(fontSize: 12))),
                     const Padding(padding: EdgeInsets.all(8), child: Text('1', style: TextStyle(fontSize: 12))),
-                    Padding(padding: const EdgeInsets.all(8), child: Text('${_formatNumber(serviceAmount)} $currency', style: const TextStyle(fontSize: 12))),
-                    Padding(padding: const EdgeInsets.all(8), child: Text('${_formatNumber(serviceAmount)} $currency', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold))),
+                    Padding(padding: const EdgeInsets.all(8), child: Text('${_formatNumber(numService)} $strCurrency', style: const TextStyle(fontSize: 12))),
+                    Padding(padding: const EdgeInsets.all(8), child: Text('${_formatNumber(numService)} $strCurrency', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold))),
+                  ],
+                ),
+              if (numTax > 0)
+                TableRow(
+                  children: [
+                    const Padding(padding: EdgeInsets.all(8), child: Text('الضريبة والرسوم الفندقية', style: TextStyle(fontSize: 12))),
+                    const Padding(padding: EdgeInsets.all(8), child: Text('1', style: TextStyle(fontSize: 12))),
+                    Padding(padding: const EdgeInsets.all(8), child: Text('${_formatNumber(numTax)} $strCurrency', style: const TextStyle(fontSize: 12))),
+                    Padding(padding: const EdgeInsets.all(8), child: Text('${_formatNumber(numTax)} $strCurrency', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold))),
                   ],
                 ),
             ],
@@ -5402,7 +5905,7 @@ class _InvoicePrintReceiptDialogState extends State<InvoicePrintReceiptDialog> {
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         const Text('المجموع الفرعي:', style: TextStyle(fontSize: 12, color: Color(0xFF64748B))),
-                        Text('${_formatNumber(amount)} $currency', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                        Text('${_formatNumber(amount)} $strCurrency', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
                       ],
                     ),
                     const SizedBox(height: 4),
@@ -5410,7 +5913,7 @@ class _InvoicePrintReceiptDialogState extends State<InvoicePrintReceiptDialog> {
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         const Text('الخدمات والرسوم:', style: TextStyle(fontSize: 12, color: Color(0xFF64748B))),
-                        Text('${_formatNumber(serviceAmount)} $currency', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                        Text('${_formatNumber(numService + numTax)} $strCurrency', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
                       ],
                     ),
                     const Divider(height: 16),
@@ -5418,7 +5921,7 @@ class _InvoicePrintReceiptDialogState extends State<InvoicePrintReceiptDialog> {
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         const Text('المبلغ الإجمالي:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF0F172A))),
-                        Text('${_formatNumber(total)} $currency', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Color(0xFF1D4ED8))),
+                        Text('${_formatNumber(total)} $strCurrency', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Color(0xFF1D4ED8))),
                       ],
                     ),
                   ],
@@ -5481,23 +5984,27 @@ class _CheckoutBookingDialogState extends State<CheckoutBookingDialog> {
 
   String _formatNumber(dynamic val) {
     if (val == null) return '0.00';
-    final num n = (val is num) ? val : (double.tryParse(val.toString()) ?? 0);
+    final num n = (val is num) ? val : (double.tryParse(val.toString().replaceAll(',', '').trim()) ?? 0);
     return n.toStringAsFixed(2).replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]},');
   }
 
   @override
   Widget build(BuildContext context) {
-    final b = widget.booking;
-    final r = widget.room ?? b['room'] ?? {};
-    final guestName = b['guest_name'] ?? b['guest']?['name'] ?? 'نزيل';
-    final roomNumber = r['room_number'] ?? b['room_number'] ?? '—';
-    final roomType = r['room_type'] ?? b['room_type'] ?? 'غرفة فندقية';
-    final basePrice = (b['total_price'] is num ? b['total_price'] : double.tryParse(b['total_price']?.toString() ?? '0') ?? 0).toDouble();
-    final currency = b['currency'] ?? 'USD';
-    final serviceAmount = double.tryParse(_serviceAmountCtrl.text) ?? 0;
+    final b = AppState.safeMap(widget.booking);
+    final r = AppState.safeMap(widget.room ?? b['room']);
+    final guest = AppState.safeMap(b['guest']);
+    final guestName = AppState.safeString(b['guest_name'] ?? guest['name'], 'نزيل');
+    final roomNumber = AppState.safeString(r['room_number'] ?? b['room_number'], '—');
+    final roomType = AppState.safeString(
+      r['room_type'] ?? r['type'] ?? b['room_type'],
+      'غرفة فندقية'
+    );
+    final basePrice = AppState.safeDouble(b['total_price']);
+    final currency = AppState.safeString(b['currency'], 'USD');
+    final serviceAmount = double.tryParse(_serviceAmountCtrl.text.replaceAll(',', '').trim()) ?? 0;
     final grandTotal = basePrice + serviceAmount;
 
-    final existingInvoice = b['invoice'];
+    final existingInvoice = b['invoice'] is Map ? AppState.safeMap(b['invoice']) : null;
     final isAlreadyPaid = existingInvoice != null && existingInvoice['status'] == 'paid';
 
     return Directionality(
@@ -5691,7 +6198,7 @@ class _CheckoutBookingDialogState extends State<CheckoutBookingDialog> {
                 : () async {
                     setState(() => _isSubmitting = true);
                     try {
-                      final servAmt = double.tryParse(_serviceAmountCtrl.text) ?? 0;
+                      final servAmt = double.tryParse(_serviceAmountCtrl.text.replaceAll(',', '').trim()) ?? 0;
                       final servDesc = _serviceDescCtrl.text.trim();
 
                       final res = await http.post(
@@ -5706,19 +6213,28 @@ class _CheckoutBookingDialogState extends State<CheckoutBookingDialog> {
                           'service_description': servDesc,
                           'payment_method': _paymentMethod,
                         }),
-                      );
+                      ).timeout(const Duration(seconds: 20));
 
                       final body = jsonDecode(res.body);
                       if (res.statusCode == 200 && mounted) {
-                        widget.onComplete();
                         Navigator.pop(context, body);
+                        widget.onComplete();
                       } else if (mounted) {
+                        final msg = (body is Map && body['message'] != null) ? body['message'].toString() : 'فشل تسجيل المغادرة.';
                         ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text(body['message'] ?? 'فشل تسجيل المغادرة.'), backgroundColor: Colors.red),
+                          SnackBar(content: Text(msg), backgroundColor: Colors.red),
                         );
                       }
-                    } catch (_) {}
-                    if (mounted) setState(() => _isSubmitting = false);
+                    } catch (e) {
+                      if (mounted) {
+                        AppState.showGlobalErrorDialog(
+                          title: 'تنبيه أثناء تسجيل المغادرة',
+                          message: 'حدث خطأ أثناء إتمام عملية تسجيل المغادرة والسداد: $e',
+                        );
+                      }
+                    } finally {
+                      if (mounted) setState(() => _isSubmitting = false);
+                    }
                   },
             icon: _isSubmitting ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) : const Icon(Icons.check, size: 18),
             label: const Text('تأكيد تسجيل المغادرة وسداد الفاتورة', style: TextStyle(fontWeight: FontWeight.bold)),
@@ -6744,10 +7260,18 @@ class _RoomRackTabState extends State<RoomRackTab> {
                                     ),
                                   );
                                   if (res['invoice'] != null) {
-                                    showDialog(
-                                      context: context,
-                                      builder: (ctx) => InvoicePrintReceiptDialog(invoice: res['invoice']),
-                                    );
+                                    await Future.delayed(const Duration(milliseconds: 150));
+                                    if (mounted) {
+                                      final invoiceWithDetails = {
+                                        ...AppState.safeMap(res['invoice']),
+                                        if (res['invoice']['booking'] == null) 'booking': b,
+                                        if (res['invoice']['room'] == null) 'room': room,
+                                      };
+                                      showDialog(
+                                        context: context,
+                                        builder: (ctx) => InvoicePrintReceiptDialog(invoice: invoiceWithDetails),
+                                      );
+                                    }
                                   }
                                 }
                               },
@@ -6763,7 +7287,11 @@ class _RoomRackTabState extends State<RoomRackTab> {
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                             ),
                             onPressed: () {
-                              final invoiceData = inv ?? {
+                              final invoiceData = inv != null ? {
+                                ...AppState.safeMap(inv),
+                                'booking': b,
+                                'room': room,
+                              } : {
                                 'invoice_number': 'INV-${b['id']}',
                                 'amount': b['total_price'],
                                 'service_amount': 0,
@@ -8143,10 +8671,18 @@ class _BookingsTabState extends State<BookingsTab> {
                                     ),
                                   );
                                   if (res['invoice'] != null) {
-                                    showDialog(
-                                      context: context,
-                                      builder: (ctx) => InvoicePrintReceiptDialog(invoice: res['invoice']),
-                                    );
+                                    await Future.delayed(const Duration(milliseconds: 150));
+                                    if (mounted) {
+                                      final invoiceWithDetails = {
+                                        ...AppState.safeMap(res['invoice']),
+                                        if (res['invoice']['booking'] == null) 'booking': b,
+                                        if (res['invoice']['room'] == null) 'room': b['room'],
+                                      };
+                                      showDialog(
+                                        context: context,
+                                        builder: (ctx) => InvoicePrintReceiptDialog(invoice: invoiceWithDetails),
+                                      );
+                                    }
                                   }
                                 }
                               },
@@ -8164,7 +8700,7 @@ class _BookingsTabState extends State<BookingsTab> {
                                 showDialog(
                                   context: context,
                                   builder: (ctx) => InvoicePrintReceiptDialog(invoice: {
-                                    ...inv,
+                                    ...AppState.safeMap(inv),
                                     'booking': b,
                                     'room': b['room'],
                                   }),
@@ -9016,46 +9552,65 @@ class _InvoicesTabState extends State<InvoicesTab> {
   }
 
   Future<void> _handlePrintInvoice(Map<String, dynamic> inv) async {
-    final html = NativePrintAndSaveService.buildInvoiceHtml(inv, 'a4');
-    await NativePrintAndSaveService.printWithNativeDialog(html);
+    try {
+      final html = NativePrintAndSaveService.buildInvoiceHtml(inv, 'a4');
+      await NativePrintAndSaveService.printWithNativeDialog(html);
+    } catch (e) {
+      if (mounted) {
+        AppState.showGlobalErrorDialog(
+          title: 'تنبيه أثناء طباعة الفاتورة',
+          message: 'تعذر تشغيل أمر الطباعة: $e',
+        );
+      }
+    }
   }
 
   Future<void> _handleDownloadInvoice(Map<String, dynamic> inv) async {
-    final invNumber = inv['invoice_number'] ?? '${inv['id']}';
-    final defaultName = 'فاتورة_$invNumber.pdf';
-    final chosenPath = await NativePrintAndSaveService.showSaveFileDialog(
-      defaultFileName: defaultName,
-      filter: 'ملفات PDF (*.pdf)|*.pdf|ملفات HTML (*.html)|*.html|جميع الملفات (*.*)|*.*',
-    );
-    if (chosenPath != null && chosenPath.isNotEmpty) {
-      final html = NativePrintAndSaveService.buildInvoiceHtml(inv, 'a4');
-      final success = await NativePrintAndSaveService.saveDocument(html, chosenPath);
-      if (success && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            backgroundColor: const Color(0xFF059669),
-            duration: const Duration(seconds: 5),
-            content: Text(
-              AppLocale.tr(
-                '✓ تم حفظ وتنزيل الفاتورة بنجاح في:\n$chosenPath',
-                '✓ Invoice downloaded and saved successfully at:\n$chosenPath',
+    try {
+      final invMap = AppState.safeMap(inv);
+      final invNumber = AppState.safeString(invMap['invoice_number'], '${invMap['id']}').replaceAll('#', '');
+      final defaultName = 'فاتورة_$invNumber.pdf';
+      final chosenPath = await NativePrintAndSaveService.showSaveFileDialog(
+        defaultFileName: defaultName,
+        filter: 'ملفات PDF (*.pdf)|*.pdf|ملفات HTML (*.html)|*.html|جميع الملفات (*.*)|*.*',
+      );
+      if (chosenPath != null && chosenPath.isNotEmpty) {
+        final html = NativePrintAndSaveService.buildInvoiceHtml(invMap, 'a4');
+        final success = await NativePrintAndSaveService.saveDocument(html, chosenPath);
+        if (success && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              backgroundColor: const Color(0xFF059669),
+              duration: const Duration(seconds: 5),
+              content: Text(
+                AppLocale.tr(
+                  '✓ تم حفظ وتنزيل الفاتورة بنجاح في:\n$chosenPath',
+                  '✓ Invoice downloaded and saved successfully at:\n$chosenPath',
+                ),
+              ),
+              action: SnackBarAction(
+                label: AppLocale.tr('📂 فتح الملف', '📂 Open File'),
+                textColor: Colors.white,
+                onPressed: () => NativePrintAndSaveService.openFile(chosenPath),
               ),
             ),
-            action: SnackBarAction(
-              label: AppLocale.tr('📂 فتح الملف', '📂 Open File'),
-              textColor: Colors.white,
-              onPressed: () => NativePrintAndSaveService.openFile(chosenPath),
+          );
+        } else if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              backgroundColor: const Color(0xFFDC2626),
+              content: Text(
+                AppLocale.tr('تعذر حفظ الفاتورة، يرجى المحاولة مجدداً.', 'Failed to save invoice, please try again.'),
+              ),
             ),
-          ),
-        );
-      } else if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            backgroundColor: const Color(0xFFDC2626),
-            content: Text(
-              AppLocale.tr('تعذر حفظ الفاتورة، يرجى المحاولة مجدداً.', 'Failed to save invoice, please try again.'),
-            ),
-          ),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        AppState.showGlobalErrorDialog(
+          title: 'تنبيه أثناء تنزيل الفاتورة',
+          message: 'تعذر تنزيل وحفظ الفاتورة: $e',
         );
       }
     }
@@ -9221,13 +9776,23 @@ class _InvoicesTabState extends State<InvoicesTab> {
                     if (res.statusCode == 200) {
                       _fetchInvoices();
                       if (data['invoice'] != null) {
-                        showDialog(
-                          context: context,
-                          builder: (c) => InvoicePrintReceiptDialog(invoice: data['invoice']),
-                        );
+                        await Future.delayed(const Duration(milliseconds: 150));
+                        if (mounted) {
+                          showDialog(
+                            context: context,
+                            builder: (c) => InvoicePrintReceiptDialog(invoice: data['invoice']),
+                          );
+                        }
                       }
                     }
-                  } catch (_) {}
+                  } catch (e) {
+                    if (mounted) {
+                      AppState.showGlobalErrorDialog(
+                        title: 'تنبيه أثناء إصدار الفاتورة',
+                        message: 'حدث خطأ أثناء إصدار الفاتورة: $e',
+                      );
+                    }
+                  }
                 },
                 child: const Text('إصدار وحفظ الفاتورة'),
               ),
@@ -9248,15 +9813,27 @@ class _InvoicesTabState extends State<InvoicesTab> {
       if (res.statusCode == 200) {
         final body = jsonDecode(res.body);
         _fetchInvoices();
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم سداد الفاتورة وإيداع القيد المحاسبي بنجاح.'), backgroundColor: Colors.green));
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم سداد الفاتورة وإيداع القيد المحاسبي بنجاح.'), backgroundColor: Colors.green));
+        }
         if (body['invoice'] != null) {
-          showDialog(
-            context: context,
-            builder: (ctx) => InvoicePrintReceiptDialog(invoice: body['invoice']),
-          );
+          await Future.delayed(const Duration(milliseconds: 150));
+          if (mounted) {
+            showDialog(
+              context: context,
+              builder: (ctx) => InvoicePrintReceiptDialog(invoice: body['invoice']),
+            );
+          }
         }
       }
-    } catch (_) {}
+    } catch (e) {
+      if (mounted) {
+        AppState.showGlobalErrorDialog(
+          title: 'تنبيه أثناء سداد الفاتورة',
+          message: 'حدث خطأ أثناء سداد الفاتورة: $e',
+        );
+      }
+    }
   }
 
   void _confirmDeleteInvoice(int id, String invNumber) {
@@ -13202,45 +13779,64 @@ class _AccountingStatementPrintDialogState extends State<AccountingStatementPrin
   }
 
   Future<void> _handlePrint() async {
-    final html = NativePrintAndSaveService.buildStatementHtml(widget.report);
-    await NativePrintAndSaveService.printWithNativeDialog(html);
+    try {
+      final html = NativePrintAndSaveService.buildStatementHtml(widget.report);
+      await NativePrintAndSaveService.printWithNativeDialog(html);
+    } catch (e) {
+      if (mounted) {
+        AppState.showGlobalErrorDialog(
+          title: 'تنبيه أثناء طباعة كشف الحساب',
+          message: 'تعذر تشغيل أمر الطباعة: $e',
+        );
+      }
+    }
   }
 
   Future<void> _handleSavePdf() async {
-    setState(() => _isSaving = true);
-    final report = widget.report;
-    final defaultFileName = 'كشف_حساب_${report['from'] ?? ''}_${report['to'] ?? ''}.pdf'.replaceAll(' ', '_');
+    try {
+      setState(() => _isSaving = true);
+      final report = AppState.safeMap(widget.report);
+      final defaultFileName = 'كشف_حساب_${report['from'] ?? ''}_${report['to'] ?? ''}.pdf'.replaceAll(' ', '_');
 
-    final chosenPath = await NativePrintAndSaveService.showSaveFileDialog(
-      defaultFileName: defaultFileName,
-      filter: 'ملفات PDF (*.pdf)|*.pdf|ملفات HTML (*.html)|*.html|جميع الملفات (*.*)|*.*',
-    );
+      final chosenPath = await NativePrintAndSaveService.showSaveFileDialog(
+        defaultFileName: defaultFileName,
+        filter: 'ملفات PDF (*.pdf)|*.pdf|ملفات HTML (*.html)|*.html|جميع الملفات (*.*)|*.*',
+      );
 
-    if (chosenPath != null && chosenPath.isNotEmpty) {
-      final html = NativePrintAndSaveService.buildStatementHtml(report);
-      final success = await NativePrintAndSaveService.saveDocument(html, chosenPath);
-      if (mounted) {
-        if (success) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('✓ تم حفظ كشف الحساب بنجاح في:\n$chosenPath'),
-              backgroundColor: const Color(0xFF059669),
-              duration: const Duration(seconds: 6),
-              action: SnackBarAction(
-                label: '📂 فتح الملف',
-                textColor: Colors.white,
-                onPressed: () => NativePrintAndSaveService.openFile(chosenPath),
+      if (chosenPath != null && chosenPath.isNotEmpty) {
+        final html = NativePrintAndSaveService.buildStatementHtml(report);
+        final success = await NativePrintAndSaveService.saveDocument(html, chosenPath);
+        if (mounted) {
+          if (success) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('✓ تم حفظ كشف الحساب بنجاح في:\n$chosenPath'),
+                backgroundColor: const Color(0xFF059669),
+                duration: const Duration(seconds: 6),
+                action: SnackBarAction(
+                  label: '📂 فتح الملف',
+                  textColor: Colors.white,
+                  onPressed: () => NativePrintAndSaveService.openFile(chosenPath),
+                ),
               ),
-            ),
-          );
-        } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('تعذر حفظ كشف الحساب، يرجى التحقق من أذونات المجلد.'), backgroundColor: Color(0xFFDC2626)),
-          );
+            );
+          } else {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('تعذر حفظ كشف الحساب، يرجى التحقق من أذونات المجلد.'), backgroundColor: Color(0xFFDC2626)),
+            );
+          }
         }
       }
+    } catch (e) {
+      if (mounted) {
+        AppState.showGlobalErrorDialog(
+          title: 'تنبيه أثناء حفظ كشف الحساب',
+          message: 'تعذر حفظ كشف الحساب: $e',
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
     }
-    if (mounted) setState(() => _isSaving = false);
   }
 
   void _openPrinterOptions() {
