@@ -18,7 +18,7 @@ class InvoicePdfService
         $invoice->loadMissing(['hotel', 'booking.guest', 'room', 'payments']);
         $publicUrl = URL::route('invoice.by-hotel', [
             'hotelSlug' => $invoice->hotel->slug,
-            'invoice' => $invoice->id,
+            'invoice' => $invoice->invoice_number ?: $invoice->id,
         ]);
         $qrCode = QrCode::format('svg')->size(180)->margin(1)->generate($publicUrl);
         $logoData = $this->hotelLogoData($invoice);
@@ -45,8 +45,14 @@ class InvoicePdfService
         $hotelDirectory = Str::slug($invoice->hotel->slug ?: $invoice->hotel->name);
         StorageFolderManager::ensureHotelDirectories($hotelDirectory);
 
+        $filename = ($invoice->invoice_number ? Str::slug($invoice->invoice_number) : $invoice->id) . '.pdf';
         $path = $hotelDirectory . '/invoices/' . $invoice->id . '.pdf';
-        Storage::disk('public')->put($path, $mpdf->Output('', Destination::STRING_RETURN));
+        $numberPath = $hotelDirectory . '/invoices/' . $filename;
+        $pdfOutput = $mpdf->Output('', Destination::STRING_RETURN);
+        Storage::disk('public')->put($path, $pdfOutput);
+        if ($path !== $numberPath) {
+            Storage::disk('public')->put($numberPath, $pdfOutput);
+        }
 
         $invoice->forceFill(['pdf_path' => $path])->save();
 

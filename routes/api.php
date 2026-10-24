@@ -85,6 +85,7 @@ Route::middleware('auth:sanctum')->group(function () {
         // Bookings & Front Desk (Check-in / Check-out)
         Route::get('/bookings', [StaffController::class, 'bookings']);
         Route::post('/bookings', [StaffController::class, 'storeBooking']);
+        Route::put('/bookings/{id}', [StaffController::class, 'updateBooking']);
         Route::post('/bookings/{id}/check-in', [StaffController::class, 'checkInBooking']);
         Route::post('/bookings/{id}/check-out', [StaffController::class, 'checkOutBooking']);
         Route::post('/bookings/{id}/cancel', [StaffController::class, 'cancelBooking']);
@@ -100,6 +101,7 @@ Route::middleware('auth:sanctum')->group(function () {
         // Accounts & Cash Book
         Route::get('/accounts', [StaffController::class, 'accounts']);
         Route::post('/accounts', [StaffController::class, 'storeAccount']);
+        Route::delete('/accounts/{id}', [StaffController::class, 'deleteAccount']);
 
         // Invoices & Billing
         Route::get('/invoices', [StaffController::class, 'invoices']);

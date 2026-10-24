@@ -2879,10 +2879,18 @@ $htmlContent
     final cashier = AppState.safeString(AppState.currentUser?['name'], 'موظف الاستقبال');
 
     final hotelMap = AppState.safeMap(inv['hotel']);
-    final hotelSlug = AppState.safeString(hotelMap['slug'] ?? inv['hotel_slug'] ?? AppState.currentUser?['hotel_slug'], 'hotel');
-    final invoiceId = AppState.safeString(inv['id']);
+    final hotelSlug = AppState.safeString(
+      hotelMap['slug'] ?? inv['hotel_slug'] ?? AppState.currentUser?['hotel_slug'],
+      'hotel',
+    );
+    final invoiceIdentifier = AppState.safeString(
+      (inv['invoice_number'] != null && inv['invoice_number'].toString().isNotEmpty)
+          ? inv['invoice_number']
+          : inv['id'],
+      '1',
+    );
     final baseUrl = AppState.serverBaseUrl.isNotEmpty ? AppState.serverBaseUrl : 'https://hotel.ahmadinsights.online';
-    final publicUrl = '$baseUrl/$hotelSlug/invoices/$invoiceId';
+    final publicUrl = '$baseUrl/$hotelSlug/invoices/$invoiceIdentifier';
     final qrImgUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=140x140&margin=0&data=${Uri.encodeComponent(publicUrl)}';
 
     String formatNum(dynamic v) {
@@ -2942,7 +2950,7 @@ $thermalTaxRow
 <div class="divider"></div>
 <div class="text-center" style="margin: 8px 0;">
   <img src="$qrImgUrl" width="90" height="90" alt="QR Code" style="display: block; margin: 0 auto 4px auto;">
-  <div style="font-size: 8.5px; color: #444; word-break: break-all;">/$hotelSlug/invoices/$invoiceId</div>
+  <div style="font-size: 8.5px; color: #444; word-break: break-all;">/$hotelSlug/invoices/$invoiceIdentifier</div>
 </div>
 <div class="divider"></div>
 <div class="text-center" style="font-size: 10px; color: #555;">
@@ -3063,7 +3071,7 @@ td { padding: 10px; border: 1px solid #cbd5e1; text-align: right; }
   <div style="background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 10px 14px; text-align: center; width: 170px;">
     <img src="$qrImgUrl" width="105" height="105" alt="QR Code" style="display: block; margin: 0 auto 4px auto;">
     <div style="font-size: 10px; font-weight: bold; color: #0f172a;">رمز التحقق الرقمي من الفاتورة</div>
-    <div style="font-size: 8.5px; color: #64748b; margin-top: 2px; word-break: break-all;">/$hotelSlug/invoices/$invoiceId</div>
+    <div style="font-size: 8.5px; color: #64748b; margin-top: 2px; word-break: break-all;">/$hotelSlug/invoices/$invoiceIdentifier</div>
   </div>
 
   <!-- Totals Box -->
@@ -6627,6 +6635,358 @@ class _CreateBookingDialogState extends State<CreateBookingDialog> {
 }
 
 // ============================================================================
+// 2.35 EDIT BOOKING DIALOG (تعديل بيانات وتواريخ الحجز)
+// ============================================================================
+class EditBookingDialog extends StatefulWidget {
+  final Map<String, dynamic> booking;
+  final VoidCallback onBookingUpdated;
+
+  const EditBookingDialog({
+    super.key,
+    required this.booking,
+    required this.onBookingUpdated,
+  });
+
+  @override
+  State<EditBookingDialog> createState() => _EditBookingDialogState();
+}
+
+class _EditBookingDialogState extends State<EditBookingDialog> {
+  late TextEditingController _guestNameCtrl;
+  late TextEditingController _guestPhoneCtrl;
+  late TextEditingController _priceCtrl;
+  late TextEditingController _notesCtrl;
+
+  late DateTime _checkInDate;
+  late DateTime _checkOutDate;
+  late String _currency;
+  late String _status;
+  bool _isSubmitting = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final b = widget.booking;
+    final guest = AppState.safeMap(b['guest']);
+    _guestNameCtrl = TextEditingController(text: AppState.safeString(guest['name']));
+    _guestPhoneCtrl = TextEditingController(text: AppState.safeString(guest['phone']));
+    _priceCtrl = TextEditingController(text: AppState.safeDouble(b['total_price']).toStringAsFixed(2));
+    _notesCtrl = TextEditingController(text: AppState.safeString(b['notes']));
+
+    _currency = AppState.safeString(b['currency'], 'USD');
+    _status = AppState.safeString(b['status'], 'confirmed');
+
+    try {
+      _checkInDate = DateTime.parse(b['check_in'].toString());
+    } catch (_) {
+      _checkInDate = DateTime.now();
+    }
+    try {
+      _checkOutDate = DateTime.parse(b['check_out'].toString());
+      if (!_checkOutDate.isAfter(_checkInDate)) {
+        _checkOutDate = _checkInDate.add(const Duration(days: 1));
+      }
+    } catch (_) {
+      _checkOutDate = _checkInDate.add(const Duration(days: 1));
+    }
+  }
+
+  @override
+  void dispose() {
+    _guestNameCtrl.dispose();
+    _guestPhoneCtrl.dispose();
+    _priceCtrl.dispose();
+    _notesCtrl.dispose();
+    super.dispose();
+  }
+
+  int get _nights {
+    final diff = _checkOutDate.difference(_checkInDate).inDays;
+    return diff > 0 ? diff : 1;
+  }
+
+  Future<void> _pickCheckInDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _checkInDate,
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2035),
+      helpText: 'اختر تاريخ الوصول الجديد',
+      confirmText: 'تحديد',
+      cancelText: 'إلغاء',
+    );
+    if (picked != null) {
+      setState(() {
+        _checkInDate = picked;
+        if (!_checkOutDate.isAfter(_checkInDate)) {
+          _checkOutDate = _checkInDate.add(const Duration(days: 1));
+        }
+      });
+    }
+  }
+
+  Future<void> _pickCheckOutDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _checkOutDate.isAfter(_checkInDate) ? _checkOutDate : _checkInDate.add(const Duration(days: 1)),
+      firstDate: _checkInDate.add(const Duration(days: 1)),
+      lastDate: DateTime(2035),
+      helpText: 'اختر تاريخ المغادرة الجديد',
+      confirmText: 'تحديد',
+      cancelText: 'إلغاء',
+    );
+    if (picked != null) {
+      setState(() {
+        _checkOutDate = picked;
+      });
+    }
+  }
+
+  Future<void> _submitUpdate() async {
+    final id = widget.booking['id'];
+    setState(() => _isSubmitting = true);
+
+    try {
+      final res = await http.put(
+        Uri.parse('${AppState.apiUrl}/staff/bookings/$id'),
+        headers: {
+          'Authorization': 'Bearer ${AppState.token}',
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: jsonEncode({
+          'check_in': _checkInDate.toIso8601String().substring(0, 10),
+          'check_out': _checkOutDate.toIso8601String().substring(0, 10),
+          'guest_name': _guestNameCtrl.text.trim(),
+          'guest_phone': _guestPhoneCtrl.text.trim(),
+          'currency': _currency,
+          'total_price': double.tryParse(_priceCtrl.text) ?? 0,
+          'status': _status,
+          'notes': _notesCtrl.text.trim(),
+        }),
+      );
+
+      final body = jsonDecode(res.body);
+      if (res.statusCode == 200 && mounted) {
+        Navigator.pop(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(body['message'] ?? 'تم تحديث بيانات الحجز بنجاح.'),
+            backgroundColor: Colors.green,
+          ),
+        );
+        widget.onBookingUpdated();
+      } else if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(body['message'] ?? 'فشل تحديث الحجز.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } catch (_) {}
+    if (mounted) setState(() => _isSubmitting = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final b = widget.booking;
+    final room = AppState.safeMap(b['room']);
+    final roomNumber = AppState.safeString(room['room_number'], '—');
+
+    return Directionality(
+      textDirection: TextDirection.rtl,
+      child: AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(
+          children: [
+            const Icon(Icons.edit_calendar_rounded, color: Color(0xFF1D4ED8)),
+            const SizedBox(width: 8),
+            Text('تعديل الحجز #${b['id']} (غرفة $roomNumber)', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+          ],
+        ),
+        content: SizedBox(
+          width: 520,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _guestNameCtrl,
+                        decoration: InputDecoration(
+                          labelText: 'اسم النزيل',
+                          prefixIcon: const Icon(Icons.person),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: TextField(
+                        controller: _guestPhoneCtrl,
+                        decoration: InputDecoration(
+                          labelText: 'رقم الهاتف',
+                          prefixIcon: const Icon(Icons.phone),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF8FAFC),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: const Color(0xFFE2E8F0)),
+                  ),
+                  child: Column(
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: InkWell(
+                              onTap: _pickCheckInDate,
+                              child: Container(
+                                padding: const EdgeInsets.all(10),
+                                decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(8), border: Border.all(color: const Color(0xFFCBD5E1))),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const Text('تاريخ الوصول', style: TextStyle(fontSize: 11, color: Color(0xFF64748B))),
+                                    const SizedBox(height: 4),
+                                    Row(
+                                      children: [
+                                        const Icon(Icons.calendar_today, size: 14, color: Color(0xFF1D4ED8)),
+                                        const SizedBox(width: 6),
+                                        Text(_checkInDate.toIso8601String().substring(0, 10), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          const Icon(Icons.arrow_forward, size: 16, color: Color(0xFF94A3B8)),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: InkWell(
+                              onTap: _pickCheckOutDate,
+                              child: Container(
+                                padding: const EdgeInsets.all(10),
+                                decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(8), border: Border.all(color: const Color(0xFFCBD5E1))),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const Text('تاريخ المغادرة', style: TextStyle(fontSize: 11, color: Color(0xFF64748B))),
+                                    const SizedBox(height: 4),
+                                    Row(
+                                      children: [
+                                        const Icon(Icons.event_busy, size: 14, color: Color(0xFFDC2626)),
+                                        const SizedBox(width: 6),
+                                        Text(_checkOutDate.toIso8601String().substring(0, 10), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Text('إجمالي فترة الإقامة: $_nights ليالٍ', style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF1D4ED8), fontSize: 12)),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Expanded(
+                      flex: 2,
+                      child: TextField(
+                        controller: _priceCtrl,
+                        keyboardType: TextInputType.number,
+                        decoration: InputDecoration(
+                          labelText: 'المبلغ الإجمالي',
+                          prefixIcon: const Icon(Icons.payments_outlined),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      flex: 1,
+                      child: DropdownButtonFormField<String>(
+                        value: _currency,
+                        decoration: InputDecoration(
+                          labelText: 'العملة',
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                        items: const [
+                          DropdownMenuItem(value: 'USD', child: Text('USD (\$)')),
+                          DropdownMenuItem(value: 'SYP', child: Text('SYP (ل.س)')),
+                        ],
+                        onChanged: (val) {
+                          if (val != null) setState(() => _currency = val);
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                DropdownButtonFormField<String>(
+                  value: _status,
+                  decoration: InputDecoration(
+                    labelText: 'حالة الحجز',
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  items: const [
+                    DropdownMenuItem(value: 'pending', child: Text('قيد الانتظار (Pending)')),
+                    DropdownMenuItem(value: 'confirmed', child: Text('حجز مؤكد (Confirmed)')),
+                    DropdownMenuItem(value: 'checked_in', child: Text('مقيم حالياً (Checked-in)')),
+                    DropdownMenuItem(value: 'checked_out', child: Text('غادر الفندق (Checked-out)')),
+                    DropdownMenuItem(value: 'cancelled', child: Text('ملغى (Cancelled)')),
+                  ],
+                  onChanged: (val) {
+                    if (val != null) setState(() => _status = val);
+                  },
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: _notesCtrl,
+                  maxLines: 2,
+                  decoration: InputDecoration(
+                    labelText: 'ملاحظات وتفاصيل إضافية للحجز',
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('إلغاء')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1D4ED8), foregroundColor: Colors.white),
+            onPressed: _isSubmitting ? null : _submitUpdate,
+            child: _isSubmitting
+                ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                : const Text('حفظ التعديلات'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ============================================================================
 // 2.4 ROOM RACK TAB (لوحة الغرف وحالتها اللحظية التفاعلية)
 // ============================================================================
 class RoomRackTab extends StatefulWidget {
@@ -8437,6 +8797,7 @@ class BookingsTab extends StatefulWidget {
 
 class _BookingsTabState extends State<BookingsTab> {
   final ScrollController _scrollController = ScrollController();
+  final ScrollController _hScrollController = ScrollController();
   bool _isLoading = true;
   List<dynamic> _bookings = [];
   String _statusFilter = 'all';
@@ -8450,6 +8811,7 @@ class _BookingsTabState extends State<BookingsTab> {
   @override
   void dispose() {
     _scrollController.dispose();
+    _hScrollController.dispose();
     super.dispose();
   }
 
@@ -8489,17 +8851,86 @@ class _BookingsTabState extends State<BookingsTab> {
   }
 
 
-  Future<void> _performCancel(int id) async {
+  Future<void> _performConfirm(int id) async {
     if (AppState.isReadOnlyOwner()) {
       _showOwnerWarning();
       return;
     }
     try {
+      final res = await http.put(
+        Uri.parse('${AppState.apiUrl}/staff/bookings/$id/status'),
+        headers: {
+          'Authorization': 'Bearer ${AppState.token}',
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: jsonEncode({'status': 'confirmed'}),
+      );
+      final body = jsonDecode(res.body);
+      if (res.statusCode == 200 && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(body['message'] ?? 'تم تأكيد الحجز بنجاح.'),
+            backgroundColor: Colors.green,
+          ),
+        );
+        _fetchBookings();
+      }
+    } catch (_) {}
+  }
+
+  void _openEditBookingDialog(Map<String, dynamic> b) {
+    if (AppState.isReadOnlyOwner()) {
+      _showOwnerWarning();
+      return;
+    }
+    showDialog(
+      context: context,
+      builder: (ctx) => EditBookingDialog(
+        booking: b,
+        onBookingUpdated: () => _fetchBookings(),
+      ),
+    );
+  }
+
+  Future<void> _performCancel(int id) async {
+    if (AppState.isReadOnlyOwner()) {
+      _showOwnerWarning();
+      return;
+    }
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Row(
+            children: [
+              Icon(Icons.warning_amber_rounded, color: Colors.red),
+              SizedBox(width: 8),
+              Text('إلغاء الحجز'),
+            ],
+          ),
+          content: Text('هل أنت متأكد من رغبتك في إلغاء الحجز رقم #$id؟\nسيتم إرجاع الغرفة لحالة المتاحة.'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('تراجع')),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('نعم، إلغاء الحجز'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (confirm != true) return;
+
+    try {
       final res = await http.post(
         Uri.parse('${AppState.apiUrl}/staff/bookings/$id/cancel'),
         headers: {'Authorization': 'Bearer ${AppState.token}', 'Accept': 'application/json'},
       );
-      if (res.statusCode == 200) {
+      if (res.statusCode == 200 && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم إلغاء الحجز بنجاح.')));
         _fetchBookings();
       }
@@ -8586,20 +9017,29 @@ class _BookingsTabState extends State<BookingsTab> {
               borderRadius: BorderRadius.circular(16),
               border: Border.all(color: const Color(0xFFE2E8F0)),
             ),
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: DataTable(
-                columns: const [
-                  DataColumn(label: Text('رقم الحجز')),
-                  DataColumn(label: Text('اسم النزيل')),
-                  DataColumn(label: Text('رقم الهاتف')),
-                  DataColumn(label: Text('الغرفة والنوع')),
-                  DataColumn(label: Text('تاريخ الوصول')),
-                  DataColumn(label: Text('تاريخ المغادرة')),
-                  DataColumn(label: Text('المبلغ الإجمالي')),
-                  DataColumn(label: Text('الحالة')),
-                  DataColumn(label: Text('إجراءات الاستقبال')),
-                ],
+            child: Scrollbar(
+              controller: _hScrollController,
+              thumbVisibility: true,
+              trackVisibility: true,
+              interactive: true,
+              notificationPredicate: (notif) => notif.metrics.axis == Axis.horizontal,
+              child: SingleChildScrollView(
+                controller: _hScrollController,
+                scrollDirection: Axis.horizontal,
+                child: DataTable(
+                  columnSpacing: 14,
+                  horizontalMargin: 12,
+                  columns: const [
+                    DataColumn(label: Text('رقم الحجز')),
+                    DataColumn(label: Text('اسم النزيل')),
+                    DataColumn(label: Text('رقم الهاتف')),
+                    DataColumn(label: Text('الغرفة والنوع')),
+                    DataColumn(label: Text('تاريخ الوصول')),
+                    DataColumn(label: Text('تاريخ المغادرة')),
+                    DataColumn(label: Text('المبلغ الإجمالي')),
+                    DataColumn(label: Text('الحالة')),
+                    DataColumn(label: Text('الإجراءات')),
+                  ],
                 rows: _bookings.map((b) {
                   final status = b['status'] ?? '';
                   Color statusColor = Colors.grey;
@@ -8635,18 +9075,41 @@ class _BookingsTabState extends State<BookingsTab> {
                       Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          if (status == 'confirmed')
+                          if (status == 'pending') ...[
                             ElevatedButton.icon(
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: const Color(0xFF1D4ED8),
                                 foregroundColor: Colors.white,
                                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                              ),
+                              onPressed: () => _performConfirm(b['id']),
+                              icon: const Icon(Icons.check_circle_outline, size: 14),
+                              label: const Text('تأكيد الحجز', style: TextStyle(fontSize: 11)),
+                            ),
+                            const SizedBox(width: 6),
+                          ],
+                          IconButton(
+                            icon: const Icon(Icons.edit_note_rounded, color: Color(0xFF0F766E), size: 22),
+                            tooltip: 'تعديل الحجز والتواريخ',
+                            onPressed: () => _openEditBookingDialog(b),
+                          ),
+                          if (status == 'confirmed') ...[
+                            const SizedBox(width: 4),
+                            ElevatedButton.icon(
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: const Color(0xFF1D4ED8),
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                               ),
                               onPressed: () => _performCheckIn(b['id']),
                               icon: const Icon(Icons.login, size: 14),
                               label: const Text('تسجيل دخول (Check-in)', style: TextStyle(fontSize: 11)),
                             ),
+                          ],
                           if (status == 'checked_in') ...[
+                            const SizedBox(width: 4),
                             ElevatedButton.icon(
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: const Color(0xFF16A34A),
@@ -8691,7 +9154,7 @@ class _BookingsTabState extends State<BookingsTab> {
                             ),
                           ],
                           if (b['invoices'] != null && (b['invoices'] as List).isNotEmpty) ...[
-                            const SizedBox(width: 6),
+                            const SizedBox(width: 4),
                             IconButton(
                               icon: const Icon(Icons.receipt_long, color: Color(0xFF1D4ED8), size: 18),
                               tooltip: 'معاينة وطباعة الفاتورة',
@@ -8709,7 +9172,7 @@ class _BookingsTabState extends State<BookingsTab> {
                             ),
                           ],
                           if (status != 'cancelled' && status != 'checked_out') ...[
-                            const SizedBox(width: 6),
+                            const SizedBox(width: 4),
                             IconButton(
                               onPressed: () => _performCancel(b['id']),
                               icon: const Icon(Icons.cancel_outlined, color: Colors.red, size: 18),
@@ -8723,6 +9186,7 @@ class _BookingsTabState extends State<BookingsTab> {
                 }).toList(),
               ),
             ),
+          ),
           ),
         ],
       ),
@@ -9509,6 +9973,7 @@ class InvoicesTab extends StatefulWidget {
 
 class _InvoicesTabState extends State<InvoicesTab> {
   final ScrollController _scrollController = ScrollController();
+  final ScrollController _hScrollController = ScrollController();
   bool _isLoading = true;
   List<dynamic> _invoices = [];
   String _statusFilter = 'all';
@@ -9523,6 +9988,7 @@ class _InvoicesTabState extends State<InvoicesTab> {
   @override
   void dispose() {
     _scrollController.dispose();
+    _hScrollController.dispose();
     _searchCtrl.dispose();
     super.dispose();
   }
@@ -10138,9 +10604,18 @@ class _InvoicesTabState extends State<InvoicesTab> {
                 borderRadius: BorderRadius.circular(16),
                 border: Border.all(color: const Color(0xFFE2E8F0)),
               ),
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: DataTable(
+              child: Scrollbar(
+                controller: _hScrollController,
+                thumbVisibility: true,
+                trackVisibility: true,
+                interactive: true,
+                notificationPredicate: (notif) => notif.metrics.axis == Axis.horizontal,
+                child: SingleChildScrollView(
+                  controller: _hScrollController,
+                  scrollDirection: Axis.horizontal,
+                  child: DataTable(
+                    columnSpacing: 14,
+                    horizontalMargin: 12,
                   columns: [
                     DataColumn(label: Text(AppLocale.tr('رقم الفاتورة', 'Invoice #'))),
                     DataColumn(label: Text(AppLocale.tr('النزيل والغرفة', 'Guest & Room'))),
@@ -10242,6 +10717,7 @@ class _InvoicesTabState extends State<InvoicesTab> {
                 ),
               ),
             ),
+            ),
         ],
       ),
     ),
@@ -10261,6 +10737,7 @@ class AccountsTab extends StatefulWidget {
 
 class _AccountsTabState extends State<AccountsTab> {
   final ScrollController _scrollController = ScrollController();
+  final ScrollController _hScrollController = ScrollController();
   bool _isLoading = true;
   List<dynamic> _accounts = [];
   String _typeFilter = 'all';
@@ -10276,6 +10753,7 @@ class _AccountsTabState extends State<AccountsTab> {
   @override
   void dispose() {
     _scrollController.dispose();
+    _hScrollController.dispose();
     _searchCtrl.dispose();
     super.dispose();
   }
@@ -10516,6 +10994,115 @@ class _AccountsTabState extends State<AccountsTab> {
               style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1E293B), foregroundColor: Colors.white),
               onPressed: () => Navigator.pop(ctx),
               child: const Text('إغلاق'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _confirmDeleteAccount(Map<String, dynamic> a) {
+    if (AppState.isReadOnlyOwner()) return;
+
+    if (a['invoice_id'] != null) {
+      showDialog(
+        context: context,
+        builder: (ctx) => Directionality(
+          textDirection: TextDirection.rtl,
+          child: AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            title: const Row(
+              children: [
+                Icon(Icons.info_outline, color: Color(0xFFD97706)),
+                SizedBox(width: 8),
+                Text('تنبيه قيد مرتبط بفاتورة'),
+              ],
+            ),
+            content: const Text(
+              'هذا القيد المحاسبي مرتبط بفاتورة حجز نزيل مسددة.\nلحذف هذا القيد المالي، يرجى التوجه لتبويب الفواتير وحذف الفاتورة نفسها حيث سيتم توثيق ذلك تلقائياً في سجل المحذوفات.',
+              style: TextStyle(fontSize: 13),
+            ),
+            actions: [
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1E293B), foregroundColor: Colors.white),
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('حسناً'),
+              ),
+            ],
+          ),
+        ),
+      );
+      return;
+    }
+
+    final reasonCtrl = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (ctx) => Directionality(
+        textDirection: TextDirection.rtl,
+        child: AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: Row(
+            children: [
+              const Icon(Icons.warning_amber_rounded, color: Color(0xFFDC2626)),
+              const SizedBox(width: 8),
+              Text('حذف القيد المالي #${a['id']} وتوثيقه'),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'هل أنت متأكد من رغبتك في حذف القيد المالي بمبلغ ${_formatNumber(a['amount'])} ${a['currency']}؟\nسيتم إزالة القيد وتوثيقه كاملاً في سجل المحذوفات والرقابة.',
+                style: const TextStyle(fontSize: 13),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: reasonCtrl,
+                decoration: InputDecoration(
+                  labelText: 'سبب حذف القيد (إلزامي للرقابة) *',
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('إلغاء')),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFDC2626), foregroundColor: Colors.white),
+              onPressed: () async {
+                final reason = reasonCtrl.text.trim();
+                if (reason.isEmpty) return;
+                Navigator.pop(ctx);
+                setState(() => _isLoading = true);
+                try {
+                  final res = await http.delete(
+                    Uri.parse('${AppState.apiUrl}/staff/accounts/${a['id']}'),
+                    headers: {
+                      'Authorization': 'Bearer ${AppState.token}',
+                      'Content-Type': 'application/json',
+                      'Accept': 'application/json',
+                    },
+                    body: jsonEncode({'reason': reason}),
+                  );
+                  final data = jsonDecode(res.body);
+                  if (res.statusCode == 200) {
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                      content: Text(data['message'] ?? 'تم حذف القيد وتوثيقه في سجل المحذوفات.'),
+                      backgroundColor: Colors.green,
+                    ));
+                    _fetchAccounts();
+                  } else {
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                      content: Text(data['message'] ?? 'تعذر حذف القيد المحاسبي.'),
+                      backgroundColor: Colors.red,
+                    ));
+                  }
+                } catch (_) {}
+                if (mounted) setState(() => _isLoading = false);
+              },
+              child: const Text('تأكيد الحذف والتوثيق'),
             ),
           ],
         ),
@@ -10775,19 +11362,28 @@ class _AccountsTabState extends State<AccountsTab> {
             ),
             child: filtered.isEmpty
                 ? const Padding(padding: EdgeInsets.all(32), child: Center(child: Text('لا توجد قيود مالية مسجلة تطابق الفلاتر.')))
-                : SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: DataTable(
-                      columns: const [
-                        DataColumn(label: Text('رقم السند')),
-                        DataColumn(label: Text('التاريخ')),
-                        DataColumn(label: Text('نوع الحركة')),
-                        DataColumn(label: Text('التصنيف')),
-                        DataColumn(label: Text('المبلغ')),
-                        DataColumn(label: Text('العملة')),
-                        DataColumn(label: Text('البيان / الوصف')),
-                        DataColumn(label: Text('تفاصيل')),
-                      ],
+                : Scrollbar(
+                    controller: _hScrollController,
+                    thumbVisibility: true,
+                    trackVisibility: true,
+                    interactive: true,
+                    notificationPredicate: (notif) => notif.metrics.axis == Axis.horizontal,
+                    child: SingleChildScrollView(
+                      controller: _hScrollController,
+                      scrollDirection: Axis.horizontal,
+                      child: DataTable(
+                        columnSpacing: 14,
+                        horizontalMargin: 12,
+                        columns: const [
+                          DataColumn(label: Text('رقم السند')),
+                          DataColumn(label: Text('التاريخ')),
+                          DataColumn(label: Text('نوع الحركة')),
+                          DataColumn(label: Text('التصنيف')),
+                          DataColumn(label: Text('المبلغ')),
+                          DataColumn(label: Text('العملة')),
+                          DataColumn(label: Text('البيان / الوصف')),
+                          DataColumn(label: Text('الإجراءات')),
+                        ],
                       rows: filtered.map((a) {
                         final isIncome = a['type'] == 'income';
                         final cur = a['currency'] ?? 'USD';
@@ -10811,16 +11407,28 @@ class _AccountsTabState extends State<AccountsTab> {
                           DataCell(Text(cur, style: TextStyle(color: cur == 'USD' ? Colors.blue : const Color(0xFF059669), fontWeight: FontWeight.bold))),
                           DataCell(Text(a['description'] ?? a['notes'] ?? a['title'] ?? '—')),
                           DataCell(
-                            IconButton(
-                              icon: const Icon(Icons.visibility_outlined, size: 18, color: Color(0xFF1D4ED8)),
-                              onPressed: () => _showVoucherDetails(a),
-                              tooltip: 'معاينة السند',
+                            Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                IconButton(
+                                  icon: const Icon(Icons.visibility_outlined, size: 18, color: Color(0xFF1D4ED8)),
+                                  onPressed: () => _showVoucherDetails(a),
+                                  tooltip: 'معاينة السند',
+                                ),
+                                const SizedBox(width: 4),
+                                IconButton(
+                                  icon: const Icon(Icons.delete_outline, size: 18, color: Color(0xFFDC2626)),
+                                  onPressed: () => _confirmDeleteAccount(a),
+                                  tooltip: 'حذف القيد وتوثيقه في سجل المحذوفات',
+                                ),
+                              ],
                             ),
                           ),
                         ]);
                       }).toList(),
                     ),
                   ),
+                ),
           ),
         ],
       ),

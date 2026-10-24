@@ -161,16 +161,19 @@ class InvoiceController extends Controller
         return $this->renderPublicInvoice($invoice);
     }
 
-    public function publicShowByHotel(string $hotelSlug, Invoice $invoice)
+    public function publicShowByHotel(string $hotelSlug, $invoice)
     {
-        abort_unless($invoice->hotel && strtolower(rtrim($invoice->hotel->slug)) === strtolower(rtrim($hotelSlug)), 404);
+        $invoiceModel = Invoice::where(function ($q) use ($invoice) {
+            $q->where('id', $invoice)->orWhere('invoice_number', $invoice);
+        })->firstOrFail();
 
-        return $this->renderPublicInvoice($invoice);
+        abort_unless($invoiceModel->hotel && strtolower(rtrim($invoiceModel->hotel->slug)) === strtolower(rtrim($hotelSlug)), 404);
+
+        return $this->renderPublicInvoice($invoiceModel);
     }
 
     private function renderPublicInvoice(Invoice $invoice)
     {
-        abort_unless($invoice->status === 'paid', 404);
         $invoice->load(['hotel', 'booking.guest', 'booking.creator', 'room', 'payments']);
         $hotelPhones = $invoice->hotel?->phones ? (json_decode($invoice->hotel->phones, true) ?: []) : [];
         if (! $hotelPhones && $invoice->hotel?->phone) {
@@ -179,7 +182,7 @@ class InvoiceController extends Controller
 
         $publicUrl = URL::route('invoice.by-hotel', [
             'hotelSlug' => $invoice->hotel->slug,
-            'invoice' => $invoice->id,
+            'invoice' => $invoice->invoice_number ?: $invoice->id,
         ]);
         $qrCode = \SimpleSoftwareIO\QrCode\Facades\QrCode::format('svg')->size(130)->margin(1)->generate($publicUrl);
 

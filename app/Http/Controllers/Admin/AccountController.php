@@ -5,6 +5,7 @@ use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Models\Account;
 use App\Models\Invoice;
+use App\Models\DeletionLog;
 use Carbon\Carbon;
 use Mpdf\Mpdf;
 use Mpdf\Output\Destination;
@@ -122,7 +123,7 @@ class AccountController extends Controller
         return redirect()->route('accounts.index')->with('success', 'تم تعديل العملية المالية بنجاح');
     }
 
-    public function destroy(Account $account)
+    public function destroy(Request $request, Account $account)
     {
         abort_unless((int) $account->hotel_id === (int) auth()->user()->hotel_id, 404);
 
@@ -132,11 +133,27 @@ class AccountController extends Controller
                 ->with('warning', 'لا يمكن حذف قيد محاسبي مرتبط بفاتورة حجز.');
         }
 
+        DeletionLog::create([
+            'hotel_id' => $account->hotel_id,
+            'user_id' => auth()->id(),
+            'record_type' => 'account',
+            'record_id' => $account->id,
+            'reference_number' => $account->reference_number ?: ('قيد #' . $account->id),
+            'guest_name' => '—',
+            'room_number' => '—',
+            'amount' => $account->amount,
+            'currency' => $account->currency ?: 'USD',
+            'payment_status' => $account->type,
+            'reason' => $request->input('reason', 'حذف يدوي لقيد في دفتر اليومية من لوحة الإدارة'),
+            'snapshot' => $account->toArray(),
+            'deleted_at' => now(),
+        ]);
+
         $account->delete();
 
         return redirect()
             ->route('accounts.index')
-            ->with('success', 'تم حذف القيد المحاسبي بنجاح.');
+            ->with('success', 'تم حذف القيد المحاسبي وتوثيقه في سجل المحذوفات.');
     }
 
     private function reportData(Request $request): array

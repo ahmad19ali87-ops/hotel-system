@@ -34,16 +34,17 @@ class Invoice extends Model
         return $this->belongsTo(Room::class);
     }
     protected static function boot()
-{
-    parent::boot();
+    {
+        parent::boot();
 
-    static::creating(function ($invoice) {
-        $date = now()->format('Y-m-d');
-        $nextNumber = Invoice::max('id') + 1;
-
-        $invoice->invoice_number = "HOTEL-$date-$nextNumber";
-    });
-}
+        static::creating(function ($invoice) {
+            if (empty($invoice->invoice_number)) {
+                $date = now()->format('Y-m-d');
+                $nextNumber = ((int) Invoice::max('id')) + 1;
+                $invoice->invoice_number = "HOTEL-$date-$nextNumber";
+            }
+        });
+    }
 public function payments()
 {
     return $this->hasMany(Payment::class);

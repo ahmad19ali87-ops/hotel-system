@@ -99,7 +99,7 @@ Route::get('/invoice/{invoice}/verify', [InvoiceController::class, 'publicShow']
     ->name('invoice.public.legacy');
 Route::get('/{hotelSlug}/invoices/{invoice}', [InvoiceController::class, 'publicShowByHotel'])
     ->where('hotelSlug', '[A-Za-z0-9-]+')
-    ->whereNumber('invoice')
+    ->where('invoice', '[A-Za-z0-9_-]+')
     ->name('invoice.by-hotel');
 
 Route::middleware(['auth', 'role:super_admin'])->prefix('platform')->name('platform.')->group(function () {

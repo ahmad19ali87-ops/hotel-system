@@ -13,6 +13,9 @@ use App\Models\User;
 use App\Models\Room;
 use App\Models\Booking;
 use App\Models\AppNotification;
+use App\Models\RoomType;
+use App\Models\Guest;
+use App\Models\Account;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Tests\TestCase;
@@ -2328,5 +2331,214 @@ class ExampleTest extends TestCase
         $this->assertEquals(1350000.0, (float)$sypStay['invoice_total']);
         $this->assertEquals(1350000.0, (float)$sypStay['actual_paid']);
         $this->assertTrue($sypStay['is_paid']);
+    }
+
+    public function test_staff_can_update_booking_dates_and_status()
+    {
+        $hotel = Hotel::create([
+            'name' => 'فندق دمشق التراثي',
+            'slug' => 'damascus-heritage',
+            'city' => 'دمشق',
+            'phone' => '+96311223344',
+            'is_visible' => true,
+        ]);
+
+        $user = User::create([
+            'name' => 'موظف الاستقبال',
+            'email' => 'reception@damascus-hotel.sy',
+            'password' => bcrypt('password123'),
+            'role' => 'reception',
+            'hotel_id' => $hotel->id,
+            'is_verified' => true,
+        ]);
+
+        $roomType = RoomType::create([
+            'hotel_id' => $hotel->id,
+            'name' => 'جناح ملكي',
+            'base_price' => 100,
+        ]);
+
+        $room = Room::create([
+            'hotel_id' => $hotel->id,
+            'room_type_id' => $roomType->id,
+            'room_number' => '101',
+            'floor' => 1,
+            'price' => 1500000,
+            'price_usd' => 100,
+            'status' => 'available',
+        ]);
+
+        $guest = Guest::create([
+            'hotel_id' => $hotel->id,
+            'name' => 'فادي الأحمد',
+            'phone' => '+963944112233',
+        ]);
+
+        $booking = Booking::create([
+            'hotel_id' => $hotel->id,
+            'room_id' => $room->id,
+            'guest_id' => $guest->id,
+            'check_in' => now()->toDateString(),
+            'check_out' => now()->addDays(2)->toDateString(),
+            'status' => 'pending',
+            'currency' => 'USD',
+            'total_price' => 200,
+        ]);
+
+        $token = $user->createToken('test-token')->plainTextToken;
+
+        $newCheckIn = now()->addDay()->toDateString();
+        $newCheckOut = now()->addDays(4)->toDateString();
+
+        $response = $this->withHeaders([
+            'Authorization' => 'Bearer ' . $token,
+            'Accept' => 'application/json',
+        ])->putJson("/api/staff/bookings/{$booking->id}", [
+            'check_in' => $newCheckIn,
+            'check_out' => $newCheckOut,
+            'status' => 'confirmed',
+            'total_price' => 300,
+            'currency' => 'USD',
+            'notes' => 'تم تعديل الموعد بناء على طلب النزيل',
+        ]);
+
+        $response->assertStatus(200);
+        $response->assertJson(['status' => 'success']);
+
+        $booking->refresh();
+        $this->assertEquals($newCheckIn, $booking->check_in);
+        $this->assertEquals($newCheckOut, $booking->check_out);
+        $this->assertEquals('confirmed', $booking->status);
+        $this->assertEquals(300, (float) $booking->total_price);
+    }
+
+    public function test_staff_can_delete_account_voucher_and_it_records_in_deletion_logs()
+    {
+        $hotel = Hotel::create([
+            'name' => 'فندق دمشق التراثي 2',
+            'slug' => 'damascus-heritage-2',
+            'city' => 'دمشق',
+            'phone' => '+96311223344',
+            'is_visible' => true,
+        ]);
+
+        $user = User::create([
+            'name' => 'المحاسب',
+            'email' => 'accountant@damascus-hotel.sy',
+            'password' => bcrypt('password123'),
+            'role' => 'accountant',
+            'hotel_id' => $hotel->id,
+            'is_verified' => true,
+        ]);
+
+        $account = Account::create([
+            'hotel_id' => $hotel->id,
+            'title' => 'مصاريف صيانة',
+            'type' => 'expense',
+            'category' => 'مصاريف صيانة',
+            'amount' => 50,
+            'currency' => 'USD',
+            'description' => 'شراء قطع غيار للتكييف',
+            'transaction_date' => now()->toDateString(),
+        ]);
+
+        $token = $user->createToken('test-token')->plainTextToken;
+
+        $response = $this->withHeaders([
+            'Authorization' => 'Bearer ' . $token,
+            'Accept' => 'application/json',
+        ])->deleteJson("/api/staff/accounts/{$account->id}", [
+            'reason' => 'تم إدخال القيد بالخطأ مرتين',
+        ]);
+
+        $response->assertStatus(200);
+        $response->assertJson(['status' => 'success']);
+
+        $this->assertDatabaseMissing('accounts', ['id' => $account->id]);
+
+        $this->assertDatabaseHas('deletion_logs', [
+            'hotel_id' => $hotel->id,
+            'record_type' => 'account',
+            'record_id' => $account->id,
+            'reason' => 'تم إدخال القيد بالخطأ مرتين',
+            'amount' => 50,
+            'currency' => 'USD',
+        ]);
+    }
+
+    public function test_hotel_slug_public_invoice_route_renders_by_number_and_id()
+    {
+        $hotel = Hotel::create([
+            'name' => 'فندق دمشق التراثي 3',
+            'slug' => 'damascus-heritage-3',
+            'city' => 'دمشق',
+            'phone' => '+96311223344',
+            'is_visible' => true,
+        ]);
+
+        $user = User::create([
+            'name' => 'موظف',
+            'email' => 'staff3@damascus-hotel.sy',
+            'password' => bcrypt('password123'),
+            'role' => 'reception',
+            'hotel_id' => $hotel->id,
+            'is_verified' => true,
+        ]);
+
+        $roomType = RoomType::create([
+            'hotel_id' => $hotel->id,
+            'name' => 'جناح ملكي',
+            'base_price' => 100,
+        ]);
+
+        $room = Room::create([
+            'hotel_id' => $hotel->id,
+            'room_type_id' => $roomType->id,
+            'room_number' => '301',
+            'floor' => 3,
+            'price' => 1500000,
+            'price_usd' => 100,
+            'status' => 'available',
+        ]);
+
+        $guest = Guest::create([
+            'hotel_id' => $hotel->id,
+            'name' => 'زياد خوري',
+            'phone' => '+963944887766',
+        ]);
+
+        $booking = Booking::create([
+            'hotel_id' => $hotel->id,
+            'room_id' => $room->id,
+            'guest_id' => $guest->id,
+            'check_in' => now()->toDateString(),
+            'check_out' => now()->addDays(2)->toDateString(),
+            'status' => 'checked_out',
+            'currency' => 'USD',
+            'total_price' => 200,
+        ]);
+
+        $invoice = Invoice::create([
+            'hotel_id' => $hotel->id,
+            'booking_id' => $booking->id,
+            'room_id' => $room->id,
+            'invoice_number' => 'INV-2026-DH001',
+            'amount' => 200,
+            'total' => 200,
+            'currency' => 'USD',
+            'status' => 'paid',
+        ]);
+
+        $resByNumber = $this->get("/{$hotel->slug}/invoices/{$invoice->invoice_number}");
+        $resByNumber->assertStatus(200);
+        $resByNumber->assertSee('INV-2026-DH001');
+        $resByNumber->assertSee('فندق دمشق التراثي 3');
+
+        $resById = $this->get("/{$hotel->slug}/invoices/{$invoice->id}");
+        $resById->assertStatus(200);
+        $resById->assertSee('INV-2026-DH001');
+
+        $resWrongSlug = $this->get("/other-hotel/invoices/{$invoice->id}");
+        $resWrongSlug->assertStatus(404);
     }
 }

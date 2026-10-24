@@ -572,7 +572,7 @@ class StaffController extends Controller
         $hotelId = $user->hotel_id;
 
         $query = Booking::where('hotel_id', $hotelId)
-            ->with(['guest', 'room.roomType', 'invoices'])
+            ->with(['hotel', 'guest', 'room.roomType', 'invoices.hotel'])
             ->latest();
 
         if ($request->filled('status') && $request->status !== 'all') {
@@ -869,6 +869,84 @@ class StaffController extends Controller
     }
 
     /**
+     * Update booking dates, room, guest info, and status.
+     */
+    public function updateBooking(Request $request, $id)
+    {
+        $user = $this->checkStaffAccess($request);
+        if ($user->isHotelOwner()) {
+            return response()->json(['status' => 'error', 'message' => 'عذراً، صلاحيات مالك الفندق مخصصة للاطلاع فقط.'], 403);
+        }
+
+        $hotelId = $user->hotel_id;
+        $booking = Booking::where('hotel_id', $hotelId)->with(['guest', 'room'])->findOrFail($id);
+
+        $request->validate([
+            'check_in' => ['required', 'date'],
+            'check_out' => ['required', 'date', 'after:check_in'],
+            'room_id' => ['nullable', 'integer', Rule::exists('rooms', 'id')->where('hotel_id', $hotelId)],
+            'guest_name' => ['nullable', 'string', 'max:255'],
+            'guest_phone' => ['nullable', 'string', 'max:40'],
+            'total_price' => ['nullable', 'numeric'],
+            'currency' => ['nullable', 'string', 'in:SYP,USD'],
+            'status' => ['nullable', 'string', 'in:pending,confirmed,checked_in,checked_out,cancelled'],
+            'notes' => ['nullable', 'string', 'max:1000'],
+        ]);
+
+        $room = $request->filled('room_id')
+            ? Room::where('hotel_id', $hotelId)->findOrFail($request->room_id)
+            : $booking->room;
+
+        if ($booking->guest && $request->filled('guest_name')) {
+            $booking->guest->update([
+                'name' => $request->guest_name,
+                'phone' => $request->guest_phone ?? $booking->guest->phone,
+            ]);
+        }
+
+        $currency = $request->input('currency', $booking->currency ?: 'USD');
+        $days = max(1, (int) Carbon::parse($request->check_in)->diffInDays(Carbon::parse($request->check_out)));
+        $priceSYP = (float)($room?->price ?? 0) * $days;
+        $priceUSD = (float)($room?->price_usd ?? 0) * $days;
+
+        $totalPrice = $request->filled('total_price')
+            ? (float)$request->total_price
+            : (($currency === 'USD') ? $priceUSD : $priceSYP);
+
+        $status = $request->input('status', $booking->status);
+
+        $booking->update([
+            'room_id' => $room?->id ?? $booking->room_id,
+            'check_in' => $request->check_in,
+            'check_out' => $request->check_out,
+            'currency' => $currency,
+            'total_price' => $totalPrice,
+            'total_price_usd' => $priceUSD,
+            'status' => $status,
+            'notes' => $request->input('notes', $booking->notes),
+        ]);
+
+        if ($status === 'checked_in') {
+            $room?->update(['status' => 'occupied']);
+        } elseif ($status === 'confirmed') {
+            $room?->update(['status' => 'booked']);
+        } elseif ($status === 'cancelled' || $status === 'checked_out') {
+            if ($room && ($room->status === 'occupied' || $room->status === 'booked')) {
+                $room->update([
+                    'status' => ($status === 'checked_out') ? 'cleaning' : 'available',
+                    'needs_cleaning' => ($status === 'checked_out'),
+                ]);
+            }
+        }
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'تم تحديث بيانات وتواريخ الحجز بنجاح.',
+            'booking' => $booking->fresh(['hotel', 'guest', 'room.roomType', 'invoices']),
+        ]);
+    }
+
+    /**
      * Guests list and search.
      */
     public function guests(Request $request)
@@ -1143,6 +1221,50 @@ class StaffController extends Controller
     }
 
     /**
+     * Delete an accounting voucher entry with DeletionLog audit record.
+     */
+    public function deleteAccount(Request $request, $id)
+    {
+        $user = $this->checkStaffAccess($request);
+        if ($user->isHotelOwner()) {
+            return response()->json(['status' => 'error', 'message' => 'عذراً، صلاحيات مالك الفندق مخصصة للاطلاع فقط.'], 403);
+        }
+
+        $account = Account::where('hotel_id', $user->hotel_id)->findOrFail($id);
+        if ($account->invoice_id) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'لا يمكن حذف قيد محاسبي مرتبط بفاتورة حجز مسددة. يرجى حذف الفاتورة المرتبطة لإلغاء القيد تلقائياً.',
+            ], 422);
+        }
+
+        $reason = $request->input('reason', 'حذف يدوي لقيد في دفتر اليومية');
+
+        DeletionLog::create([
+            'hotel_id' => $user->hotel_id,
+            'user_id' => $user->id,
+            'record_type' => 'account',
+            'record_id' => $account->id,
+            'reference_number' => $account->reference_number ?: ('قيد #' . $account->id),
+            'guest_name' => '—',
+            'room_number' => '—',
+            'amount' => $account->amount,
+            'currency' => $account->currency ?: 'USD',
+            'payment_status' => $account->type,
+            'reason' => $reason,
+            'snapshot' => $account->toArray(),
+            'deleted_at' => now(),
+        ]);
+
+        $account->delete();
+
+        return response()->json([
+            'status' => 'success',
+            'message' => 'تم حذف القيد المحاسبي بنجاح وتوثيق العملية في سجل المحذوفات والرقابة.',
+        ]);
+    }
+
+    /**
      * List employees and their granted extra permissions.
      */
     public function employees(Request $request)
@@ -1254,7 +1376,7 @@ class StaffController extends Controller
         $user = $this->checkStaffAccess($request);
         $hotelId = $user->hotel_id;
 
-        $query = Invoice::where('hotel_id', $hotelId)->with(['booking.guest', 'room'])->latest();
+        $query = Invoice::where('hotel_id', $hotelId)->with(['hotel', 'booking.guest', 'room'])->latest();
 
         if ($request->filled('status') && $request->status !== 'all') {
             $query->where('status', $request->status);
