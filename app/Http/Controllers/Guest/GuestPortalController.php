@@ -216,8 +216,8 @@ class GuestPortalController extends Controller
         
         // Find staff recipient (hotel manager or reception)
         $receiver = User::where('hotel_id', $hotel->id)
-            ->whereIn('role', ['hotel_admin', 'admin', 'reception'])
-            ->first() ?? User::where('role', 'super_admin')->first();
+            ->whereIn('role', ['hotel_admin', 'admin', 'reception', 'hotel_owner'])
+            ->first() ?? User::where('hotel_id', $hotel->id)->first();
 
         $attachmentPath = null;
         if ($request->hasFile('attachment') && $request->file('attachment')->isValid()) {

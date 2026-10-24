@@ -313,8 +313,8 @@ class HotelController extends Controller
     {
         $hotel = Hotel::findOrFail($id);
         $staff = \App\Models\User::where('hotel_id', $hotel->id)
-            ->whereIn('role', ['hotel_admin', 'admin', 'reception'])
-            ->first() ?? \App\Models\User::where('role', 'super_admin')->first();
+            ->whereIn('role', ['hotel_admin', 'admin', 'reception', 'hotel_owner'])
+            ->first() ?? \App\Models\User::where('hotel_id', $hotel->id)->first();
 
         return response()->json([
             'status' => 'success',

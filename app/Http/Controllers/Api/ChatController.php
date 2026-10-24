@@ -277,8 +277,8 @@ class ChatController extends Controller
 
             // Find staff receiver
             $receiver = User::where('hotel_id', $hotel->id)
-                ->whereIn('role', ['hotel_admin', 'admin', 'reception'])
-                ->first() ?? User::where('role', 'super_admin')->first();
+                ->whereIn('role', ['hotel_admin', 'admin', 'reception', 'hotel_owner'])
+                ->first() ?? User::where('hotel_id', $hotel->id)->first();
 
             $guest = Guest::where('hotel_id', $hotel->id)->where('user_id', $user->id)->first();
 

@@ -2541,4 +2541,210 @@ class ExampleTest extends TestCase
         $resWrongSlug = $this->get("/other-hotel/invoices/{$invoice->id}");
         $resWrongSlug->assertStatus(404);
     }
+
+    public function test_multi_tenant_notification_isolation_super_admin_staff_and_guest(): void
+    {
+        // 1. Super Admin (Site Manager)
+        $superAdmin = User::create([
+            'name' => 'مدير الموقع الرئيسي',
+            'email' => 'superadmin-iso@example.test',
+            'password' => 'password123',
+            'role' => 'super_admin',
+            'hotel_id' => null,
+            'is_verified' => true,
+        ]);
+
+        // 2. Hotel A & Staff
+        $hotelA = Hotel::create([
+            'name' => 'فندق دمشق بلازا',
+            'slug' => 'damascus-plaza-iso',
+            'province' => 'دمشق',
+            'stars' => 4,
+        ]);
+        $managerA = User::create([
+            'name' => 'مدير فندق دمشق',
+            'email' => 'mgr-a-iso@example.test',
+            'password' => 'password123',
+            'role' => 'hotel_admin',
+            'hotel_id' => $hotelA->id,
+            'is_verified' => true,
+        ]);
+        $receptionA = User::create([
+            'name' => 'استقبال فندق دمشق',
+            'email' => 'rec-a-iso@example.test',
+            'password' => 'password123',
+            'role' => 'reception',
+            'hotel_id' => $hotelA->id,
+            'is_verified' => true,
+        ]);
+
+        // 3. Hotel B & Staff
+        $hotelB = Hotel::create([
+            'name' => 'فندق حلب الشهباء',
+            'slug' => 'aleppo-shahbaa-iso',
+            'province' => 'حلب',
+            'stars' => 5,
+        ]);
+        $managerB = User::create([
+            'name' => 'مدير فندق حلب',
+            'email' => 'mgr-b-iso@example.test',
+            'password' => 'password123',
+            'role' => 'hotel_admin',
+            'hotel_id' => $hotelB->id,
+            'is_verified' => true,
+        ]);
+        $receptionB = User::create([
+            'name' => 'استقبال فندق حلب',
+            'email' => 'rec-b-iso@example.test',
+            'password' => 'password123',
+            'role' => 'reception',
+            'hotel_id' => $hotelB->id,
+            'is_verified' => true,
+        ]);
+
+        // 4. Guests
+        $guestUser1 = User::create([
+            'name' => 'النزيل سامر دمشق',
+            'email' => 'samer-iso@example.test',
+            'password' => 'password123',
+            'role' => 'guest',
+            'hotel_id' => null,
+            'is_verified' => true,
+        ]);
+        $guestProfile1 = Guest::create([
+            'hotel_id' => $hotelA->id,
+            'user_id' => $guestUser1->id,
+            'name' => 'سامر دمشق',
+            'phone' => '0933111000',
+        ]);
+
+        $guestUser2 = User::create([
+            'name' => 'النزيل طارق حلب',
+            'email' => 'tarek-iso@example.test',
+            'password' => 'password123',
+            'role' => 'guest',
+            'hotel_id' => null,
+            'is_verified' => true,
+        ]);
+        $guestProfile2 = Guest::create([
+            'hotel_id' => $hotelB->id,
+            'user_id' => $guestUser2->id,
+            'name' => 'طارق حلب',
+            'phone' => '0933222000',
+        ]);
+
+        // Create rooms
+        $roomA = Room::create([
+            'hotel_id' => $hotelA->id,
+            'room_number' => '101',
+            'price' => 150000,
+            'price_syp' => 150000,
+            'price_usd' => 40,
+            'status' => 'available',
+        ]);
+
+        // --- Step A: Trigger Hotel A operational notifications ---
+        // 1. sendToRole for Hotel A
+        \App\Services\NotificationService::sendToRole(
+            ['reception', 'hotel_admin'],
+            $hotelA->id,
+            'حجز جديد فندق دمشق',
+            'تفاصيل الحجز في فندق دمشق',
+            'booking_created'
+        );
+
+        // 2. sendToHotelStaff for Hotel A
+        \App\Services\NotificationService::sendToHotelStaff(
+            $hotelA->id,
+            'تسجيل دخول فندق دمشق',
+            'تم تسجيل الدخول في الغرفة 101',
+            'check_in'
+        );
+
+        // 3. sendToUser for Guest 1 (personal booking notification)
+        \App\Services\NotificationService::sendToUser(
+            $guestUser1,
+            'تأكيد حجزك في فندق دمشق',
+            'تم تأكيد حجزك رقم #501',
+            'booking_confirmed',
+            '🛎️',
+            '/guest/bookings',
+            $hotelA->id
+        );
+
+        // --- VERIFY ISOLATION AFTER HOTEL A EVENTS ---
+        // Super Admin MUST have 0 notifications
+        $this->assertEquals(0, $superAdmin->fresh()->unreadNotificationsCount(), 'Super Admin should have 0 hotel notifications');
+        $this->assertEquals(0, $superAdmin->fresh()->notifications()->count(), 'Super Admin should query 0 hotel notifications');
+
+        // Hotel A staff must have their notifications
+        $this->assertEquals(2, $managerA->fresh()->unreadNotificationsCount(), 'Manager A should receive Hotel A notifications');
+        $this->assertEquals(2, $receptionA->fresh()->unreadNotificationsCount(), 'Reception A should receive Hotel A notifications');
+
+        // Hotel B staff MUST have 0 notifications
+        $this->assertEquals(0, $managerB->fresh()->unreadNotificationsCount(), 'Manager B must NOT receive Hotel A notifications');
+        $this->assertEquals(0, $receptionB->fresh()->unreadNotificationsCount(), 'Reception B must NOT receive Hotel A notifications');
+
+        // Guest 1 must have 1 notification
+        $this->assertEquals(1, $guestUser1->fresh()->unreadNotificationsCount(), 'Guest 1 should receive their booking notification');
+
+        // Guest 2 MUST have 0 notifications
+        $this->assertEquals(0, $guestUser2->fresh()->unreadNotificationsCount(), 'Guest 2 must NOT receive Guest 1 notification');
+
+        // --- Step B: Trigger Hotel B operational notifications ---
+        \App\Services\NotificationService::sendToHotelStaff(
+            $hotelB->id,
+            'طلب تنظيف فندق حلب',
+            'الغرفة 202 بحاجة لتنظيف',
+            'cleaning_request'
+        );
+
+        \App\Services\NotificationService::sendToUser(
+            $guestUser2,
+            'فاتورتك في فندق حلب جاهزة',
+            'فاتورة رقم #990 جاهزة للاطلاع',
+            'check_out',
+            '🚪',
+            '/guest/bookings',
+            $hotelB->id
+        );
+
+        // --- VERIFY ISOLATION AFTER HOTEL B EVENTS ---
+        // Super Admin still MUST have 0 notifications
+        $this->assertEquals(0, $superAdmin->fresh()->unreadNotificationsCount(), 'Super Admin should still have 0 notifications');
+
+        // Hotel A staff count must NOT have increased
+        $this->assertEquals(2, $managerA->fresh()->unreadNotificationsCount(), 'Manager A count should remain 2');
+
+        // Hotel B staff receives Hotel B notification
+        $this->assertEquals(1, $managerB->fresh()->unreadNotificationsCount(), 'Manager B should receive Hotel B notification');
+        $this->assertEquals(1, $receptionB->fresh()->unreadNotificationsCount(), 'Reception B should receive Hotel B notification');
+
+        // Guest 2 receives their own notification
+        $this->assertEquals(1, $guestUser2->fresh()->unreadNotificationsCount(), 'Guest 2 should receive their notification');
+
+        // Guest 1 still has only 1 notification
+        $this->assertEquals(1, $guestUser1->fresh()->unreadNotificationsCount(), 'Guest 1 should still have 1 notification');
+
+        // --- Step C: Trigger Platform-Level Alert for Super Admin ---
+        \App\Services\NotificationService::sendToRole(
+            'super_admin',
+            null,
+            '🚨 إنذار أمني للمنصة',
+            'رصد محاولات دخول مشبوهة',
+            'security_alert'
+        );
+
+        // Super Admin now receives the platform alert
+        $this->assertEquals(1, $superAdmin->fresh()->unreadNotificationsCount(), 'Super Admin should receive platform security alert');
+        $this->assertEquals(1, $superAdmin->fresh()->notifications()->count());
+        $this->assertEquals('🚨 إنذار أمني للمنصة', $superAdmin->fresh()->notifications()->first()->title);
+
+        // Neither Hotel A staff, Hotel B staff, nor Guests received the platform security alert
+        $this->assertEquals(2, $managerA->fresh()->unreadNotificationsCount());
+        $this->assertEquals(1, $managerB->fresh()->unreadNotificationsCount());
+        $this->assertEquals(1, $guestUser1->fresh()->unreadNotificationsCount());
+        $this->assertEquals(1, $guestUser2->fresh()->unreadNotificationsCount());
+    }
 }
+

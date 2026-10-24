@@ -9,7 +9,7 @@ use Illuminate\Support\Collection;
 class NotificationService
 {
     /**
-     * Send a notification to a specific user.
+     * Send a notification to a specific user with strict role & tenant boundaries.
      */
     public static function sendToUser(
         User|int $user,
@@ -21,17 +21,58 @@ class NotificationService
         ?int $hotelId = null,
         ?array $data = null
     ): ?AppNotification {
-        $userId = $user instanceof User ? $user->id : $user;
-        if (!$userId) {
+        $userObj = $user instanceof User ? $user : User::find($user);
+        if (!$userObj) {
             return null;
         }
 
-        if (!$hotelId && $user instanceof User) {
-            $hotelId = $user->hotel_id;
+        if (!$hotelId && $userObj->hotel_id) {
+            $hotelId = $userObj->hotel_id;
+        }
+
+        // Rule 1: Super admin & Platform admin must NEVER receive hotel-specific operational notifications
+        if (in_array($userObj->role, ['super_admin', 'platform_admin'], true)) {
+            $platformAllowedTypes = [
+                'security_alert',
+                'crm_lead',
+                'subscription_request',
+                'support_ticket',
+                'broadcast_message',
+                'system',
+                'platform_announcement',
+            ];
+
+            // If the notification belongs to a specific hotel or is an operational hotel type, reject for super admin
+            if ($hotelId !== null || !in_array($type, $platformAllowedTypes, true)) {
+                return null;
+            }
+        }
+
+        // Rule 2: Hotel staff must only receive notifications for their own hotel or platform broadcasts
+        if ($userObj->hotel_id && !in_array($userObj->role, ['super_admin', 'platform_admin', 'guest'], true)) {
+            if ($hotelId !== null && (int) $hotelId !== (int) $userObj->hotel_id) {
+                return null;
+            }
+        }
+
+        // Rule 3: Customer / Guest isolation:
+        // Guests must NOT receive staff-internal operational notifications
+        if ($userObj->role === 'guest') {
+            $staffInternalTypes = [
+                'cleaning_request',
+                'cleaning_done',
+                'maintenance_request',
+                'crm_lead',
+                'security_alert',
+                'system_metric',
+            ];
+            if (in_array($type, $staffInternalTypes, true)) {
+                return null;
+            }
         }
 
         return AppNotification::create([
-            'user_id' => $userId,
+            'user_id' => $userObj->id,
             'hotel_id' => $hotelId,
             'type' => $type,
             'title' => $title,
@@ -58,8 +99,10 @@ class NotificationService
     ): int {
         $count = 0;
         foreach ($users as $user) {
-            self::sendToUser($user, $title, $message, $type, $icon, $link, $hotelId, $data);
-            $count++;
+            $created = self::sendToUser($user, $title, $message, $type, $icon, $link, $hotelId, $data);
+            if ($created) {
+                $count++;
+            }
         }
         return $count;
     }
@@ -82,10 +125,9 @@ class NotificationService
 
         $query = User::whereIn('role', $roles);
         if ($hotelId) {
-            $query->where(function ($q) use ($hotelId) {
-                $q->where('hotel_id', $hotelId)
-                  ->orWhereIn('role', ['super_admin', 'platform_admin']);
-            });
+            // Strictly isolated to this hotel's staff; NEVER route to super_admin or platform_admin
+            $query->where('hotel_id', $hotelId)
+                  ->whereNotIn('role', ['super_admin', 'platform_admin']);
         }
 
         $users = $query->get();
@@ -93,7 +135,8 @@ class NotificationService
     }
 
     /**
-     * Send notification to all registered guests (e.g. for promotional offers).
+     * Send notification to registered guests.
+     * If $hotelId is provided, restricts strictly to guests associated with that hotel.
      */
     public static function sendToGuests(
         string $title,
@@ -104,12 +147,28 @@ class NotificationService
         ?int $hotelId = null,
         ?array $data = null
     ): int {
-        $guests = User::where('role', 'guest')->get();
+        $query = User::where('role', 'guest');
+
+        if ($hotelId) {
+            // Strictly guests of this specific hotel
+            $query->where(function ($q) use ($hotelId) {
+                $q->where('hotel_id', $hotelId)
+                  ->orWhereHas('guestProfiles', function ($gq) use ($hotelId) {
+                      $gq->where('hotel_id', $hotelId);
+                  })
+                  ->orWhereHas('guestProfiles.bookings', function ($bq) use ($hotelId) {
+                      $bq->where('hotel_id', $hotelId);
+                  });
+            });
+        }
+
+        $guests = $query->get();
         return self::sendToUsers($guests, $title, $message, $type, $icon, $link, $hotelId, $data);
     }
 
     /**
-     * Send notification to all hotel staff and managers.
+     * Send notification to hotel staff and managers of a specific hotel.
+     * Never reaches super_admin, platform_admin, or guests.
      */
     public static function sendToHotelStaff(
         ?int $hotelId,
@@ -120,20 +179,21 @@ class NotificationService
         ?string $link = null,
         ?array $data = null
     ): int {
-        $query = User::where('role', '!=', 'guest');
-        if ($hotelId) {
-            $query->where(function ($q) use ($hotelId) {
-                $q->where('hotel_id', $hotelId)
-                  ->orWhereIn('role', ['super_admin', 'platform_admin']);
-            });
+        if (!$hotelId) {
+            return 0;
         }
-        $users = $query->get();
+
+        $users = User::where('hotel_id', $hotelId)
+            ->where('role', '!=', 'guest')
+            ->whereNotIn('role', ['super_admin', 'platform_admin'])
+            ->get();
 
         return self::sendToUsers($users, $title, $message, $type, $icon, $link, $hotelId, $data);
     }
 
     /**
-     * Send notification to everyone belonging to this hotel (staff, admins, and guests).
+     * Send notification to everyone belonging to this specific hotel (staff and guests of this hotel).
+     * Never reaches super_admin or platform_admin.
      */
     public static function sendToHotelEveryone(
         ?int $hotelId,
@@ -144,16 +204,20 @@ class NotificationService
         ?string $link = null,
         ?array $data = null
     ): int {
-        $query = User::query();
-        if ($hotelId) {
-            $query->where(function ($q) use ($hotelId) {
-                $q->where('hotel_id', $hotelId)
-                  ->orWhereIn('role', ['super_admin', 'platform_admin']);
-            });
+        if (!$hotelId) {
+            return 0;
         }
-        $users = $query->get();
+
+        $users = User::where(function ($q) use ($hotelId) {
+            $q->where('hotel_id', $hotelId)
+              ->orWhereHas('guestProfiles', function ($gq) use ($hotelId) {
+                  $gq->where('hotel_id', $hotelId);
+              })
+              ->orWhereHas('guestProfiles.bookings', function ($bq) use ($hotelId) {
+                  $bq->where('hotel_id', $hotelId);
+              });
+        })->whereNotIn('role', ['super_admin', 'platform_admin'])->get();
 
         return self::sendToUsers($users, $title, $message, $type, $icon, $link, $hotelId, $data);
     }
 }
-

@@ -11,13 +11,14 @@ use Illuminate\Http\Request;
 class NotificationController extends Controller
 {
     /**
-     * Get user notifications list.
+     * Get user notifications list with strict isolation.
      */
     public function index(Request $request)
     {
         $user = $request->user();
 
-        $query = AppNotification::where('user_id', $user->id);
+        // Use scoped relationship to isolate platform vs hotel vs guest
+        $query = $user->notifications();
 
         if ($request->filled('type') && $request->type !== 'all') {
             $query->where('type', $request->type);
@@ -32,9 +33,7 @@ class NotificationController extends Controller
             ->take(50)
             ->get();
 
-        $unreadCount = AppNotification::where('user_id', $user->id)
-            ->where('is_read', false)
-            ->count();
+        $unreadCount = $user->unreadNotificationsCount();
 
         $data = $notifications->map(function ($n) {
             return [
@@ -65,13 +64,13 @@ class NotificationController extends Controller
     {
         $user = $request->user();
 
-        $notification = AppNotification::where('user_id', $user->id)->findOrFail($id);
+        $notification = $user->notifications()->findOrFail($id);
         $notification->markAsRead();
 
         return response()->json([
             'status' => 'success',
             'message' => 'تم تحديد الإشعار كمقروء.',
-            'unread_count' => AppNotification::where('user_id', $user->id)->where('is_read', false)->count(),
+            'unread_count' => $user->unreadNotificationsCount(),
         ]);
     }
 
@@ -82,8 +81,7 @@ class NotificationController extends Controller
     {
         $user = $request->user();
 
-        AppNotification::where('user_id', $user->id)
-            ->where('is_read', false)
+        $user->unreadNotifications()
             ->update([
                 'is_read' => true,
                 'read_at' => now(),
@@ -97,7 +95,8 @@ class NotificationController extends Controller
     }
 
     /**
-     * Send broadcast / targeted notification to hotel staff or everyone.
+     * Send broadcast / targeted notification to hotel staff or hotel guests.
+     * Strictly isolated to this hotel only.
      */
     public function sendBroadcast(Request $request)
     {
@@ -127,8 +126,7 @@ class NotificationController extends Controller
         } elseif ($target === 'staff') {
             $count = NotificationService::sendToHotelStaff($hotelId, $title, $message, $type, $icon, null, ['sender' => $user->name]);
         } elseif ($target === 'guest') {
-            $guests = User::where('hotel_id', $hotelId)->where('role', 'guest')->get();
-            $count = NotificationService::sendToUsers($guests, $title, $message, $type, $icon, null, $hotelId, ['sender' => $user->name]);
+            $count = NotificationService::sendToGuests($title, $message, $type, $icon, null, $hotelId, ['sender' => $user->name]);
         } else {
             $count = NotificationService::sendToRole($target, $hotelId, $title, $message, $type, $icon, null, ['sender' => $user->name]);
         }

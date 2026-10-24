@@ -218,12 +218,38 @@ class User extends Authenticatable
 
     public function notifications()
     {
-        return $this->hasMany(AppNotification::class, 'user_id');
+        $relation = $this->hasMany(AppNotification::class, 'user_id');
+
+        // Isolation: Super admin & Platform admin only view platform-level notifications
+        if (in_array($this->role, ['super_admin', 'platform_admin'], true)) {
+            return $relation->where(function ($q) {
+                $q->whereNull('hotel_id')
+                  ->orWhereIn('type', [
+                      'security_alert',
+                      'crm_lead',
+                      'subscription_request',
+                      'support_ticket',
+                      'broadcast_message',
+                      'system',
+                      'platform_announcement',
+                  ]);
+            });
+        }
+
+        // Isolation: Hotel staff and managers only view notifications for their hotel or platform broadcasts
+        if ($this->hotel_id && !in_array($this->role, ['guest'], true)) {
+            return $relation->where(function ($q) {
+                $q->where('hotel_id', $this->hotel_id)
+                  ->orWhereNull('hotel_id');
+            });
+        }
+
+        return $relation;
     }
 
     public function unreadNotifications()
     {
-        return $this->hasMany(AppNotification::class, 'user_id')->where('is_read', false);
+        return $this->notifications()->where('is_read', false);
     }
 
     public function unreadNotificationsCount(): int

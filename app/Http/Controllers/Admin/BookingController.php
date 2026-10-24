@@ -169,7 +169,13 @@ class BookingController extends Controller
         $currencyLabel = ($currency === 'USD') ? 'دولار أمريكي ($ USD)' : 'ليرة سورية (ل.س)';
 
         // إشعار تأكيد الحجز للنزيل
-        $guestUser = $booking->created_by ? User::find($booking->created_by) : $booking->guest?->user;
+        $guestUser = $booking->guest?->user;
+        if (!$guestUser && $booking->created_by) {
+            $creator = User::find($booking->created_by);
+            if ($creator && $creator->role === 'guest') {
+                $guestUser = $creator;
+            }
+        }
         if ($guestUser) {
             NotificationService::sendToUser(
                 $guestUser,
@@ -255,7 +261,13 @@ class BookingController extends Controller
         $booking->room()->update(['status' => 'reserved']);
 
         $booking->loadMissing(['hotel', 'guest.user', 'room']);
-        $guestUser = $booking->created_by ? User::find($booking->created_by) : $booking->guest?->user;
+        $guestUser = $booking->guest?->user;
+        if (!$guestUser && $booking->created_by) {
+            $creator = User::find($booking->created_by);
+            if ($creator && $creator->role === 'guest') {
+                $guestUser = $creator;
+            }
+        }
         if ($guestUser) {
             NotificationService::sendToUser(
                 $guestUser,
@@ -397,7 +409,13 @@ class BookingController extends Controller
         $pdfService->store($invoice);
 
         $booking->loadMissing(['hotel', 'guest.user', 'room']);
-        $guestUser = $booking->created_by ? User::find($booking->created_by) : $booking->guest?->user;
+        $guestUser = $booking->guest?->user;
+        if (!$guestUser && $booking->created_by) {
+            $creator = User::find($booking->created_by);
+            if ($creator && $creator->role === 'guest') {
+                $guestUser = $creator;
+            }
+        }
         if ($guestUser) {
             NotificationService::sendToUser(
                 $guestUser,

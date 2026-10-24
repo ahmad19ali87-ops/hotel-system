@@ -189,9 +189,7 @@ class StaffController extends Controller
             });
 
         // Unread notifications count
-        $unreadNotifs = AppNotification::where('hotel_id', $hotelId)
-            ->where('is_read', false)
-            ->count();
+        $unreadNotifs = $user->unreadNotificationsCount();
 
         // Recent bookings
         $recentBookings = Booking::where('hotel_id', $hotelId)
@@ -681,6 +679,21 @@ class StaffController extends Controller
             '/bookings'
         );
 
+        // Notify the specific guest if a user account exists
+        $guestUser = $guest->user_id ? User::find($guest->user_id) : null;
+        if ($guestUser && $guestUser->role === 'guest') {
+            NotificationService::sendToUser(
+                $guestUser,
+                'تأكيد حجزك الفندقي بنجاح 🛎️',
+                "تم إنشاء حجزك رقم #{$booking->id} في فندق " . ($booking->hotel?->name ?? 'الفندق') . " للغرفة رقم {$room->room_number}.",
+                'booking_confirmed',
+                '🛎️',
+                '/guest/bookings',
+                $hotelId,
+                ['booking_id' => $booking->id]
+            );
+        }
+
         return response()->json([
             'status' => 'success',
             'message' => 'تم إنشاء الحجز وتسكين النزيل بنجاح.',
@@ -710,6 +723,27 @@ class StaffController extends Controller
             '🔑',
             '/bookings'
         );
+
+        // Notify the specific guest
+        $guestUser = $booking->guest?->user;
+        if (!$guestUser && $booking->created_by) {
+            $creator = User::find($booking->created_by);
+            if ($creator && $creator->role === 'guest') {
+                $guestUser = $creator;
+            }
+        }
+        if ($guestUser && $guestUser->role === 'guest') {
+            NotificationService::sendToUser(
+                $guestUser,
+                'أهلاً بك - تم تسجيل الوصول بنجاح 🔑',
+                "تم تسجيل وصولك إلى الغرفة رقم " . ($booking->room?->room_number ?? '—') . " في فندق " . ($booking->hotel?->name ?? 'الفندق') . ". نتمنى لك إقامة ممتعة!",
+                'check_in',
+                '🔑',
+                '/guest/bookings',
+                $booking->hotel_id,
+                ['booking_id' => $booking->id]
+            );
+        }
 
         return response()->json([
             'status' => 'success',
@@ -803,6 +837,27 @@ class StaffController extends Controller
             '/cleaning'
         );
 
+        // Notify the specific guest
+        $guestUser = $booking->guest?->user;
+        if (!$guestUser && $booking->created_by) {
+            $creator = User::find($booking->created_by);
+            if ($creator && $creator->role === 'guest') {
+                $guestUser = $creator;
+            }
+        }
+        if ($guestUser && $guestUser->role === 'guest') {
+            NotificationService::sendToUser(
+                $guestUser,
+                'تم تسجيل المغادرة - فاتورة إقامتك جاهزة 🚪',
+                "شكراً لإقامتك في فندق " . ($booking->hotel?->name ?? 'الفندق') . ". تم إتمام تسجيل المغادرة وإصدار فاتورتك برقم " . ($invoice->invoice_number ?? "#{$invoice->id}") . ".",
+                'check_out',
+                '🚪',
+                '/guest/bookings',
+                $booking->hotel_id,
+                ['booking_id' => $booking->id, 'invoice_id' => $invoice->id]
+            );
+        }
+
         return response()->json([
             'status' => 'success',
             'message' => 'تم تسجيل مغادرة النزيل، تحويل الغرفة لقسم التنظيف، وتسجيل الفاتورة والإيراد بنجاح.',
@@ -835,6 +890,27 @@ class StaffController extends Controller
             '❌',
             '/bookings'
         );
+
+        // Notify the specific guest
+        $guestUser = $booking->guest?->user;
+        if (!$guestUser && $booking->created_by) {
+            $creator = User::find($booking->created_by);
+            if ($creator && $creator->role === 'guest') {
+                $guestUser = $creator;
+            }
+        }
+        if ($guestUser && $guestUser->role === 'guest') {
+            NotificationService::sendToUser(
+                $guestUser,
+                'تم إلغاء الحجز ❌',
+                "تم إلغاء حجزك رقم #{$booking->id} في فندق " . ($booking->hotel?->name ?? 'الفندق') . ".",
+                'booking_cancelled',
+                '❌',
+                '/guest/bookings',
+                $booking->hotel_id,
+                ['booking_id' => $booking->id]
+            );
+        }
 
         return response()->json([
             'status' => 'success',
@@ -937,6 +1013,27 @@ class StaffController extends Controller
                     'needs_cleaning' => ($status === 'checked_out'),
                 ]);
             }
+        }
+
+        // Notify the specific guest
+        $guestUser = $booking->guest?->user;
+        if (!$guestUser && $booking->created_by) {
+            $creator = User::find($booking->created_by);
+            if ($creator && $creator->role === 'guest') {
+                $guestUser = $creator;
+            }
+        }
+        if ($guestUser && $guestUser->role === 'guest') {
+            NotificationService::sendToUser(
+                $guestUser,
+                'تحديث على بيانات حجزك 📅',
+                "تم تحديث بيانات وتواريخ حجزك رقم #{$booking->id} في فندق " . ($booking->hotel?->name ?? 'الفندق') . ". تاريخ الوصول: {$booking->check_in}، تاريخ المغادرة: {$booking->check_out}.",
+                'booking_updated',
+                '📅',
+                '/guest/bookings',
+                $booking->hotel_id,
+                ['booking_id' => $booking->id]
+            );
         }
 
         return response()->json([
