@@ -31,6 +31,7 @@ class SubscriptionPlan extends Model
         'max_rooms' => 'integer',
         'max_users' => 'integer',
         'sort_order' => 'integer',
+        'features' => 'array',
     ];
 
     public function getFeaturesListAttribute(): array

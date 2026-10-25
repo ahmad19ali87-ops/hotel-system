@@ -29,6 +29,12 @@ use Illuminate\Support\Facades\Route;
 Route::get('/', [PublicHotelController::class, 'index'])->name('home');
 Route::get('/hotels', [PublicHotelController::class, 'index'])->name('hotels.list');
 Route::get('/offers', [GuestPortalController::class, 'offers'])->name('offers.index');
+Route::get('/pricing', [\App\Http\Controllers\Platform\CrmController::class, 'publicPricing'])->name('pricing');
+
+// Demo Hotel Interactive Mode
+Route::get('/demo', [\App\Http\Controllers\DemoController::class, 'enter'])->name('demo.enter');
+Route::post('/demo/reset', [\App\Http\Controllers\DemoController::class, 'reset'])->name('demo.reset');
+Route::post('/demo/exit', [\App\Http\Controllers\DemoController::class, 'exit'])->name('demo.exit');
 
 Route::get('/downloads/windows', function () {
     $path = public_path('downloads/hotel_desktop_windows.zip');
@@ -128,6 +134,8 @@ Route::middleware(['auth', 'role:super_admin'])->prefix('platform')->name('platf
     // Platform Integrated CRM, Subscriptions & SaaS Operations
     Route::get('/crm', [\App\Http\Controllers\Platform\CrmController::class, 'index'])->name('crm.index');
     Route::post('/crm/plans', [\App\Http\Controllers\Platform\CrmController::class, 'storePlan'])->name('crm.plans.store');
+    Route::put('/crm/plans/{plan}', [\App\Http\Controllers\Platform\CrmController::class, 'updatePlan'])->name('crm.plans.update');
+    Route::delete('/crm/plans/{plan}', [\App\Http\Controllers\Platform\CrmController::class, 'destroyPlan'])->name('crm.plans.destroy');
     Route::post('/crm/subscriptions/assign', [\App\Http\Controllers\Platform\CrmController::class, 'assignSubscription'])->name('crm.subscriptions.assign');
     Route::post('/crm/invoices', [\App\Http\Controllers\Platform\CrmController::class, 'storeInvoice'])->name('crm.invoices.store');
     Route::post('/crm/invoices/{invoice}/pay', [\App\Http\Controllers\Platform\CrmController::class, 'markInvoicePaid'])->name('crm.invoices.pay');
@@ -136,6 +144,8 @@ Route::middleware(['auth', 'role:super_admin'])->prefix('platform')->name('platf
     Route::post('/crm/leads', [\App\Http\Controllers\Platform\CrmController::class, 'storeLead'])->name('crm.leads.store');
     Route::put('/crm/leads/{lead}/status', [\App\Http\Controllers\Platform\CrmController::class, 'updateLeadStatus'])->name('crm.leads.status');
     Route::post('/crm/campaigns', [\App\Http\Controllers\Platform\CrmController::class, 'storeCampaign'])->name('crm.campaigns.store');
+    Route::put('/crm/campaigns/{campaign}', [\App\Http\Controllers\Platform\CrmController::class, 'updateCampaign'])->name('crm.campaigns.update');
+    Route::delete('/crm/campaigns/{campaign}', [\App\Http\Controllers\Platform\CrmController::class, 'destroyCampaign'])->name('crm.campaigns.destroy');
     Route::post('/crm/campaigns/{campaign}/toggle', [\App\Http\Controllers\Platform\CrmController::class, 'toggleCampaign'])->name('crm.campaigns.toggle');
 });
 

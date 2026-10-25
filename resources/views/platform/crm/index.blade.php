@@ -39,6 +39,28 @@
             <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
         </div>
     @endif
+    @if(session('error'))
+        <div class="alert alert-danger alert-dismissible fade show mb-4 shadow-sm" role="alert">
+            <div class="d-flex align-items-center gap-2">
+                <span class="fs-5">✕</span>
+                <div>{{ session('error') }}</div>
+            </div>
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+    @endif
+
+    @if($errors->any())
+        <div class="alert alert-danger alert-dismissible fade show mb-4 shadow-sm" role="alert">
+            <div class="font-bold mb-1">يرجى تصحيح الأخطاء التالية:</div>
+            <ul class="mb-0 text-sm list-disc ps-5">
+                @foreach($errors->all() as $error)
+                    <li>{{ $error }}</li>
+                @endforeach
+            </ul>
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+    @endif
+
 
     {{-- Top SaaS & CRM Financial Metrics Bar --}}
     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 mb-6">
@@ -377,23 +399,124 @@
                         </ul>
                     </div>
 
-                    <div class="pt-3 border-t flex items-center justify-between text-xs">
+                    <div class="pt-3 border-t flex items-center justify-between text-xs flex-wrap gap-2">
                         <span class="badge {{ $plan->is_active ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-600' }}">
                             {{ $plan->is_active ? 'باقة نشطة ومتاحة' : 'معطلة' }}
                         </span>
-                        <button class="btn btn-sm btn-outline-secondary font-bold text-xs" data-bs-toggle="modal" data-bs-target="#assignSubModal" onclick="document.getElementById('modal_plan_id').value = '{{ $plan->id }}';">
-                            تعيين لفندق ➕
-                        </button>
+                        <div class="flex items-center gap-1.5">
+                            <button type="button" class="btn btn-sm btn-outline-primary font-bold text-xs" onclick='openEditPlanModal(@json($plan))'>
+                                ✏️ تعديل
+                            </button>
+                            <form action="{{ route('platform.crm.plans.destroy', $plan) }}" method="POST" class="d-inline" onsubmit="return confirm('هل أنت متأكد من حذف هذه الباقة؟')">
+                                @csrf
+                                @method('DELETE')
+                                <button type="submit" class="btn btn-sm btn-outline-danger font-bold text-xs" title="حذف الباقة">
+                                    🗑️
+                                </button>
+                            </form>
+                            <button class="btn btn-sm btn-outline-secondary font-bold text-xs" data-bs-toggle="modal" data-bs-target="#assignSubModal" onclick="document.getElementById('modal_plan_id').value = '{{ $plan->id }}';">
+                                تعيين ➕
+                            </button>
+                        </div>
                     </div>
                 </div>
             @endforeach
         </div>
 
         {{-- Add New Plan Form Button --}}
-        <div class="text-center">
+        <div class="text-center mb-8">
             <button class="btn btn-outline-primary font-bold shadow-sm" data-bs-toggle="modal" data-bs-target="#newPlanModal">
                 ➕ إنشاء باقة اشتراك جديدة في النظام
             </button>
+        </div>
+
+        {{-- Promo Codes & Discount Coupons Section in Subscriptions Tab --}}
+        <div class="card shadow-sm border border-slate-200 bg-white rounded-2xl overflow-hidden mt-6">
+            <div class="px-5 py-4 border-b border-slate-200 bg-slate-50 flex items-center justify-between flex-wrap gap-2">
+                <div>
+                    <h3 class="text-base font-black text-slate-900 m-0">🏷️ أكواد الخصم والترويج لاشتراكات الفنادق</h3>
+                    <p class="text-xs text-slate-500 m-0 mt-0.5">يمكنك إنشاء وتعديل أكواد الخصم التي يقدمها مندوبو المبيعات أو يدخلها الفندق عند الاشتراك</p>
+                </div>
+                <button class="btn btn-primary btn-sm font-bold text-xs d-flex align-items-center gap-1" data-bs-toggle="modal" data-bs-target="#newCampaignModal" onclick="document.getElementById('campaign_redirect_tab').value = 'subscriptions';">
+                    <span>➕</span>
+                    <span>إضافة كود خصم جديد</span>
+                </button>
+            </div>
+
+            <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0 text-sm">
+                    <thead class="bg-slate-100 text-slate-700 text-xs font-bold uppercase">
+                        <tr>
+                            <th class="ps-4">اسم الحملة / الكود</th>
+                            <th>كود الخصم (Promo Code)</th>
+                            <th>قيمة / نسبة الخصم</th>
+                            <th>مرات الاستخدام</th>
+                            <th>فترة الصلاحية</th>
+                            <th>الحالة</th>
+                            <th class="text-end pe-4">الإجراءات</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-100">
+                        @forelse($campaigns as $camp)
+                            <tr>
+                                <td class="ps-4">
+                                    <div class="font-bold text-slate-900">{{ $camp->title }}</div>
+                                    <div class="text-xs text-slate-500">{{ $camp->description ?: '—' }}</div>
+                                </td>
+                                <td>
+                                    <span class="font-mono font-bold bg-indigo-50 border border-indigo-200 px-2.5 py-1 rounded text-indigo-700">{{ $camp->code }}</span>
+                                </td>
+                                <td>
+                                    @if($camp->discount_percent > 0)
+                                        <span class="font-black text-emerald-700">{{ $camp->discount_percent }}% خصم</span>
+                                    @elseif($camp->discount_fixed > 0)
+                                        <span class="font-black text-emerald-700">${{ $camp->discount_fixed }} {{ $camp->currency }}</span>
+                                    @else
+                                        <span class="text-slate-400">—</span>
+                                    @endif
+                                </td>
+                                <td>
+                                    <span class="text-xs font-bold">{{ $camp->used_count }} / {{ $camp->max_uses == -1 ? 'غير محدود' : $camp->max_uses }}</span>
+                                </td>
+                                <td class="text-xs text-slate-500">
+                                    {{ $camp->starts_at?->format('Y-m-d') }} ⬅️ {{ $camp->ends_at?->format('Y-m-d') ?: 'مستمرة دائماً' }}
+                                </td>
+                                <td>
+                                    <span class="badge {{ $camp->is_active ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-600' }}">
+                                        {{ $camp->is_active ? 'فعالة' : 'معطلة' }}
+                                    </span>
+                                </td>
+                                <td class="text-end pe-4">
+                                    <div class="inline-flex items-center gap-1">
+                                        <button type="button" class="btn btn-sm btn-outline-primary font-bold text-xs" onclick='openEditCampaignModal(@json($camp), "subscriptions")'>
+                                            ✏️ تعديل
+                                        </button>
+                                        <form action="{{ route('platform.crm.campaigns.toggle', $camp) }}" method="POST" class="d-inline">
+                                            @csrf
+                                            <input type="hidden" name="redirect_tab" value="subscriptions">
+                                            <button type="submit" class="btn btn-sm btn-outline-secondary font-bold text-xs">
+                                                {{ $camp->is_active ? 'تعطيل' : 'تفعيل' }}
+                                            </button>
+                                        </form>
+                                        <form action="{{ route('platform.crm.campaigns.destroy', $camp) }}" method="POST" class="d-inline" onsubmit="return confirm('هل أنت متأكد من حذف كود الخصم هذا؟')">
+                                            @csrf
+                                            @method('DELETE')
+                                            <input type="hidden" name="redirect_tab" value="subscriptions">
+                                            <button type="submit" class="btn btn-sm btn-outline-danger font-bold text-xs" title="حذف الكود">
+                                                🗑️
+                                            </button>
+                                        </form>
+                                    </div>
+                                </td>
+                            </tr>
+                        @empty
+                            <tr>
+                                <td colspan="7" class="text-center py-6 text-slate-400">لا توجد أكواد خصم مسجلة حالياً. اضغط "إضافة كود خصم جديد" بالأعلى لإنشاء أول كود.</td>
+                            </tr>
+                        @endforelse
+                    </tbody>
+                </table>
+            </div>
         </div>
     @endif
 
@@ -740,12 +863,26 @@
                                     </span>
                                 </td>
                                 <td class="text-end pe-4">
-                                    <form action="{{ route('platform.crm.campaigns.toggle', $camp) }}" method="POST" class="d-inline">
-                                        @csrf
-                                        <button type="submit" class="btn btn-sm btn-outline-secondary font-bold text-xs">
-                                            {{ $camp->is_active ? 'تعطيل' : 'تفعيل' }}
+                                    <div class="inline-flex items-center gap-1">
+                                        <button type="button" class="btn btn-sm btn-outline-primary font-bold text-xs" onclick='openEditCampaignModal(@json($camp), "marketing")'>
+                                            ✏️ تعديل
                                         </button>
-                                    </form>
+                                        <form action="{{ route('platform.crm.campaigns.toggle', $camp) }}" method="POST" class="d-inline">
+                                            @csrf
+                                            <input type="hidden" name="redirect_tab" value="marketing">
+                                            <button type="submit" class="btn btn-sm btn-outline-secondary font-bold text-xs">
+                                                {{ $camp->is_active ? 'تعطيل' : 'تفعيل' }}
+                                            </button>
+                                        </form>
+                                        <form action="{{ route('platform.crm.campaigns.destroy', $camp) }}" method="POST" class="d-inline" onsubmit="return confirm('هل أنت متأكد من حذف كود الخصم هذا؟')">
+                                            @csrf
+                                            @method('DELETE')
+                                            <input type="hidden" name="redirect_tab" value="marketing">
+                                            <button type="submit" class="btn btn-sm btn-outline-danger font-bold text-xs" title="حذف الكود">
+                                                🗑️
+                                            </button>
+                                        </form>
+                                    </div>
                                 </td>
                             </tr>
                         @empty
@@ -1005,24 +1142,46 @@
         <div class="modal-content rounded-2xl shadow-lg border-0">
             <form action="{{ route('platform.crm.campaigns.store') }}" method="POST">
                 @csrf
+                <input type="hidden" name="redirect_tab" id="campaign_redirect_tab" value="{{ $tab }}">
                 <div class="modal-header border-b px-6 py-4">
                     <h5 class="modal-title font-bold text-slate-900">إنشاء كود خصم / حملة تسويقية</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body p-6 space-y-4">
                     <div>
-                        <label class="form-label text-xs font-bold text-slate-700">عنوان الحملة *</label>
-                        <input type="text" name="title" class="form-control rounded-xl" required placeholder="خصم الصيف للفنادق الجديدة">
+                        <label class="form-label text-xs font-bold text-slate-700">عنوان الحملة / كود الخصم *</label>
+                        <input type="text" name="title" class="form-control rounded-xl" required placeholder="مثال: خصم الصيف للفنادق الجديدة">
+                    </div>
+
+                    <div>
+                        <label class="form-label text-xs font-bold text-slate-700">كود الخصم (Promo Code) *</label>
+                        <input type="text" name="code" class="form-control rounded-xl font-mono uppercase" required placeholder="SUMMER20">
                     </div>
 
                     <div class="grid grid-cols-2 gap-3">
                         <div>
-                            <label class="form-label text-xs font-bold text-slate-700">كود الخصم (Promo Code) *</label>
-                            <input type="text" name="code" class="form-control rounded-xl font-mono" required placeholder="SUMMER20">
+                            <label class="form-label text-xs font-bold text-slate-700">نسبة الخصم (%)</label>
+                            <input type="number" step="any" min="0" max="100" name="discount_percent" value="20" class="form-control rounded-xl" placeholder="مثال: 20">
+                            <span class="text-[11px] text-slate-400">اتركها 0 إذا كان الخصم مبلغاً ثابتاً</span>
                         </div>
                         <div>
-                            <label class="form-label text-xs font-bold text-slate-700">نسبة الخصم (%)</label>
-                            <input type="number" step="any" name="discount_percent" value="20" class="form-control rounded-xl">
+                            <label class="form-label text-xs font-bold text-slate-700">أو خصم بمبلغ ثابت</label>
+                            <input type="number" step="any" min="0" name="discount_fixed" value="0" class="form-control rounded-xl" placeholder="مثال: 15">
+                            <span class="text-[11px] text-slate-400">إذا رغبت بخصم قيمة نقدية محددة</span>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="form-label text-xs font-bold text-slate-700">عملة الخصم</label>
+                            <select name="currency" class="form-select rounded-xl">
+                                <option value="USD" selected>الدولار الأمريكي ($ USD)</option>
+                                <option value="SYP">الليرة السورية (ل.س SYP)</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="form-label text-xs font-bold text-slate-700">الحد الأقصى لمرات الاستخدام</label>
+                            <input type="number" name="max_uses" value="50" class="form-control rounded-xl" placeholder="-1 = غير محدود">
                         </div>
                     </div>
 
@@ -1032,22 +1191,16 @@
                             <input type="date" name="starts_at" value="{{ now()->toDateString() }}" class="form-control rounded-xl">
                         </div>
                         <div>
-                            <label class="form-label text-xs font-bold text-slate-700">تاريخ الانتهاء</label>
-                            <input type="date" name="ends_at" class="form-control rounded-xl">
+                            <label class="form-label text-xs font-bold text-slate-700">تاريخ الانتهاء (اختياري)</label>
+                            <input type="date" name="ends_at" class="form-control rounded-xl" placeholder="اتركه فارغاً لصلاحية مفتوحة">
                         </div>
                     </div>
 
-                    <div>
-                        <label class="form-label text-xs font-bold text-slate-700">الحد الأقصى لمرات الاستخدام (-1 = غير محدود)</label>
-                        <input type="number" name="max_uses" value="50" class="form-control rounded-xl">
-                    </div>
-
-                    <input type="hidden" name="currency" value="USD">
                     <input type="hidden" name="type" value="discount_coupon">
                 </div>
                 <div class="modal-footer border-t px-6 py-3">
                     <button type="button" class="btn btn-light btn-sm font-bold" data-bs-dismiss="modal">إلغاء</button>
-                    <button type="submit" class="btn btn-primary btn-sm font-bold">إطلاق الحملة</button>
+                    <button type="submit" class="btn btn-primary btn-sm font-bold">إطلاق وحفظ كود الخصم</button>
                 </div>
             </form>
         </div>
@@ -1123,5 +1276,224 @@
         </div>
     </div>
 </div>
+
+{{-- MODAL: Edit Subscription Plan --}}
+<div class="modal fade" id="editPlanModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-content rounded-2xl shadow-lg border-0">
+            <form id="editPlanForm" action="" method="POST">
+                @csrf
+                @method('PUT')
+                <div class="modal-header border-b px-6 py-4">
+                    <h5 class="modal-title font-bold text-slate-900">تعديل باقة الاشتراك الفندقية</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body p-6 space-y-4">
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                            <label class="form-label text-xs font-bold text-slate-700">اسم الباقة *</label>
+                            <input type="text" name="name" id="edit_plan_name" class="form-control rounded-xl" required>
+                        </div>
+                        <div>
+                            <label class="form-label text-xs font-bold text-slate-700">شارة مميزة (Badge)</label>
+                            <input type="text" name="badge" id="edit_plan_badge" class="form-control rounded-xl" placeholder="مثال: الأكثر طلباً ⭐">
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="form-label text-xs font-bold text-slate-700">وصف الباقة</label>
+                        <input type="text" name="description" id="edit_plan_description" class="form-control rounded-xl">
+                    </div>
+
+                    <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-slate-50 p-3 rounded-xl border border-slate-200">
+                        <div>
+                            <label class="form-label text-xs font-bold text-slate-700">شهري USD *</label>
+                            <input type="number" step="any" min="0" name="price_monthly_usd" id="edit_plan_price_monthly_usd" class="form-control rounded-xl" required>
+                        </div>
+                        <div>
+                            <label class="form-label text-xs font-bold text-slate-700">سنوي USD *</label>
+                            <input type="number" step="any" min="0" name="price_yearly_usd" id="edit_plan_price_yearly_usd" class="form-control rounded-xl" required>
+                        </div>
+                        <div>
+                            <label class="form-label text-xs font-bold text-slate-700">شهري ل.س *</label>
+                            <input type="number" min="0" name="price_monthly_syp" id="edit_plan_price_monthly_syp" class="form-control rounded-xl" required>
+                        </div>
+                        <div>
+                            <label class="form-label text-xs font-bold text-slate-700">سنوي ل.س *</label>
+                            <input type="number" min="0" name="price_yearly_syp" id="edit_plan_price_yearly_syp" class="form-control rounded-xl" required>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                            <label class="form-label text-xs font-bold text-slate-700">الحد الأقصى للغرف (-1 = غير محدود)</label>
+                            <input type="number" name="max_rooms" id="edit_plan_max_rooms" class="form-control rounded-xl" required>
+                        </div>
+                        <div>
+                            <label class="form-label text-xs font-bold text-slate-700">الحد الأقصى للمستخدمين (-1 = غير محدود)</label>
+                            <input type="number" name="max_users" id="edit_plan_max_users" class="form-control rounded-xl" required>
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="form-label text-xs font-bold text-slate-700">قائمة المزايا (بند في كل سطر)</label>
+                        <textarea name="features" id="edit_plan_features" class="form-control rounded-xl text-xs" rows="4"></textarea>
+                    </div>
+
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" name="is_active" value="1" id="edit_plan_is_active">
+                        <label class="form-check-label text-xs font-bold text-slate-700" for="edit_plan_is_active">
+                            تفعيل الباقة وإتاحتها للاشتراك
+                        </label>
+                    </div>
+                </div>
+                <div class="modal-footer border-t px-6 py-3">
+                    <button type="button" class="btn btn-light btn-sm font-bold" data-bs-dismiss="modal">إلغاء</button>
+                    <button type="submit" class="btn btn-primary btn-sm font-bold">حفظ تعديلات الباقة</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+{{-- MODAL: Edit Campaign / Coupon --}}
+<div class="modal fade" id="editCampaignModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content rounded-2xl shadow-lg border-0">
+            <form id="editCampaignForm" action="" method="POST">
+                @csrf
+                @method('PUT')
+                <input type="hidden" name="redirect_tab" id="edit_campaign_redirect_tab" value="{{ $tab }}">
+                <div class="modal-header border-b px-6 py-4">
+                    <h5 class="modal-title font-bold text-slate-900">تعديل كود الخصم / الحملة</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body p-6 space-y-4">
+                    <div>
+                        <label class="form-label text-xs font-bold text-slate-700">عنوان الحملة / كود الخصم *</label>
+                        <input type="text" name="title" id="edit_campaign_title" class="form-control rounded-xl" required>
+                    </div>
+
+                    <div>
+                        <label class="form-label text-xs font-bold text-slate-700">كود الخصم (Promo Code) *</label>
+                        <input type="text" name="code" id="edit_campaign_code" class="form-control rounded-xl font-mono uppercase" required>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="form-label text-xs font-bold text-slate-700">نسبة الخصم (%)</label>
+                            <input type="number" step="any" min="0" max="100" name="discount_percent" id="edit_campaign_discount_percent" class="form-control rounded-xl">
+                        </div>
+                        <div>
+                            <label class="form-label text-xs font-bold text-slate-700">أو خصم بمبلغ ثابت</label>
+                            <input type="number" step="any" min="0" name="discount_fixed" id="edit_campaign_discount_fixed" class="form-control rounded-xl">
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="form-label text-xs font-bold text-slate-700">عملة الخصم</label>
+                            <select name="currency" id="edit_campaign_currency" class="form-select rounded-xl">
+                                <option value="USD">الدولار الأمريكي ($ USD)</option>
+                                <option value="SYP">الليرة السورية (ل.س SYP)</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="form-label text-xs font-bold text-slate-700">الحد الأقصى للاستخدام (-1 = مفتوح)</label>
+                            <input type="number" name="max_uses" id="edit_campaign_max_uses" class="form-control rounded-xl">
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="form-label text-xs font-bold text-slate-700">تاريخ البداية</label>
+                            <input type="date" name="starts_at" id="edit_campaign_starts_at" class="form-control rounded-xl">
+                        </div>
+                        <div>
+                            <label class="form-label text-xs font-bold text-slate-700">تاريخ الانتهاء</label>
+                            <input type="date" name="ends_at" id="edit_campaign_ends_at" class="form-control rounded-xl">
+                        </div>
+                    </div>
+
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" name="is_active" value="1" id="edit_campaign_is_active">
+                        <label class="form-check-label text-xs font-bold text-slate-700" for="edit_campaign_is_active">
+                            الكود نشط ومفعل للاستخدام
+                        </label>
+                    </div>
+                </div>
+                <div class="modal-footer border-t px-6 py-3">
+                    <button type="button" class="btn btn-light btn-sm font-bold" data-bs-dismiss="modal">إلغاء</button>
+                    <button type="submit" class="btn btn-primary btn-sm font-bold">حفظ التعديلات</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+function openEditPlanModal(plan) {
+    var form = document.getElementById('editPlanForm');
+    form.action = '/platform/crm/plans/' + plan.id;
+
+    document.getElementById('edit_plan_name').value = plan.name || '';
+    document.getElementById('edit_plan_badge').value = plan.badge || '';
+    document.getElementById('edit_plan_description').value = plan.description || '';
+    document.getElementById('edit_plan_price_monthly_usd').value = plan.price_monthly_usd || 0;
+    document.getElementById('edit_plan_price_yearly_usd').value = plan.price_yearly_usd || 0;
+    document.getElementById('edit_plan_price_monthly_syp').value = plan.price_monthly_syp || 0;
+    document.getElementById('edit_plan_price_yearly_syp').value = plan.price_yearly_syp || 0;
+    document.getElementById('edit_plan_max_rooms').value = (plan.max_rooms !== undefined && plan.max_rooms !== null) ? plan.max_rooms : -1;
+    document.getElementById('edit_plan_max_users').value = (plan.max_users !== undefined && plan.max_users !== null) ? plan.max_users : -1;
+
+    var features = '';
+    if (Array.isArray(plan.features)) {
+        features = plan.features.join('\n');
+    } else if (typeof plan.features === 'string') {
+        try {
+            var parsed = JSON.parse(plan.features);
+            features = Array.isArray(parsed) ? parsed.join('\n') : plan.features;
+        } catch(e) {
+            features = plan.features;
+        }
+    }
+    document.getElementById('edit_plan_features').value = features;
+    document.getElementById('edit_plan_is_active').checked = !!plan.is_active;
+
+    var modal = new bootstrap.Modal(document.getElementById('editPlanModal'));
+    modal.show();
+}
+
+function openEditCampaignModal(camp, redirectTab) {
+    var form = document.getElementById('editCampaignForm');
+    form.action = '/platform/crm/campaigns/' + camp.id;
+
+    document.getElementById('edit_campaign_redirect_tab').value = redirectTab || 'subscriptions';
+    document.getElementById('edit_campaign_title').value = camp.title || '';
+    document.getElementById('edit_campaign_code').value = camp.code || '';
+    document.getElementById('edit_campaign_discount_percent').value = camp.discount_percent || 0;
+    document.getElementById('edit_campaign_discount_fixed').value = camp.discount_fixed || 0;
+    document.getElementById('edit_campaign_currency').value = camp.currency || 'USD';
+    document.getElementById('edit_campaign_max_uses').value = (camp.max_uses !== undefined && camp.max_uses !== null) ? camp.max_uses : -1;
+
+    if (camp.starts_at) {
+        document.getElementById('edit_campaign_starts_at').value = camp.starts_at.substring(0, 10);
+    } else {
+        document.getElementById('edit_campaign_starts_at').value = '';
+    }
+
+    if (camp.ends_at) {
+        document.getElementById('edit_campaign_ends_at').value = camp.ends_at.substring(0, 10);
+    } else {
+        document.getElementById('edit_campaign_ends_at').value = '';
+    }
+
+    document.getElementById('edit_campaign_is_active').checked = !!camp.is_active;
+
+    var modal = new bootstrap.Modal(document.getElementById('editCampaignModal'));
+    modal.show();
+}
+</script>
+
 @endsection
 

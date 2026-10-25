@@ -648,6 +648,32 @@
     </style>
 </head>
 <body>
+    {{-- Demo Mode Interactive Banner --}}
+    @if(session('is_demo_session') || (Auth::check() && Auth::user()->email === 'demo@hotel-system.local'))
+        <aside class="sticky top-0 z-[9999] bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-500 text-slate-950 font-bold px-4 py-2 shadow-lg border-b border-amber-600/30">
+            <div class="container d-flex flex-wrap align-items-center justify-content-between gap-2 text-xs sm:text-sm">
+                <div class="d-flex align-items-center gap-2">
+                    <span class="inline-flex items-center justify-center h-6 w-6 rounded-full bg-slate-950 text-amber-300 text-xs shadow-inner">⚡</span>
+                    <span><strong>{{ $isEn ? 'Demo Mode Active' : 'وضع التجربة الفندقية التفاعلي (Demo Mode)' }}:</strong> {{ $isEn ? 'You are exploring the hotel management dashboard in sandbox mode. Changes are isolated.' : 'أنت الآن في لوحة إدارة تجريبية معزولة. يمكنك تجربة كل الخصائص، وتُحذف كافة البيانات تلقائياً عند الخروج.' }}</span>
+                </div>
+                <div class="d-flex align-items-center gap-2">
+                    <form action="{{ route('demo.reset') }}" method="POST" class="m-0" onsubmit="return confirm('{{ $isEn ? 'Reset demo data back to clean state?' : 'هل تريد إعادة ضبط بيانات التجربة للحالة النظيفة؟' }}')">
+                        @csrf
+                        <button type="submit" class="btn btn-dark btn-sm py-1 px-2.5 font-bold text-xs rounded-lg shadow-sm">
+                            🔄 {{ $isEn ? 'Reset Data' : 'إعادة ضبط التجربة' }}
+                        </button>
+                    </form>
+                    <form action="{{ route('demo.exit') }}" method="POST" class="m-0">
+                        @csrf
+                        <button type="submit" class="btn btn-danger btn-sm py-1 px-3 font-bold text-xs rounded-lg shadow-sm">
+                            🚪 {{ $isEn ? 'Exit Demo' : 'إنهاء التجربة والخروج' }}
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </aside>
+    @endif
+
     <header class="app-header py-2.5 text-white">
         <div class="container d-flex justify-content-between align-items-center gap-2">
             
@@ -1174,7 +1200,11 @@
 
                 @else
                     <a href="{{ route('home') }}" class="nav-link-direct">{{ $isEn ? 'Home' : 'الرئيسية' }}</a>
+                    <a href="{{ route('pricing') }}" class="nav-link-direct">{{ $isEn ? 'Plans & Pricing' : 'الأسعار والاشتراكات' }}</a>
                     <a href="{{ route('offers.index') }}" class="nav-link-direct">{{ $isEn ? 'Special Offers' : 'العروض الحالية' }}</a>
+                    <a href="{{ route('demo.enter') }}" class="nav-link-direct text-amber-300 font-bold hover:text-amber-200">
+                        <span class="inline-block animate-pulse">⚡</span> {{ $isEn ? 'Live Demo' : 'تجربة النظام (Demo)' }}
+                    </a>
                     <a href="{{ route('home') }}#downloads" class="nav-link-direct">{{ $isEn ? '📲 Apps' : '📲 التطبيقات' }}</a>
                     <a href="{{ route('login') }}" class="btn btn-sm btn-light text-blue-900 font-bold px-3 py-1.5 rounded-xl shadow-sm hover:bg-white transition">{{ $isEn ? 'Login' : 'تسجيل الدخول' }}</a>
                     <a href="{{ route('register') }}" class="btn btn-sm btn-outline-light font-bold px-3 py-1.5 rounded-xl transition">{{ $isEn ? 'Register' : 'إنشاء حساب' }}</a>
@@ -1650,6 +1680,14 @@
                 <a href="{{ route('home') }}" class="mobile-nav-link">
                     <span class="text-lg">🏠</span>
                     <span>{{ $isEn ? 'Home' : 'الرئيسية' }}</span>
+                </a>
+                <a href="{{ route('pricing') }}" class="mobile-nav-link">
+                    <span class="text-lg">💳</span>
+                    <span>{{ $isEn ? 'Plans & Subscriptions' : 'باقات وااشتراكات النظام' }}</span>
+                </a>
+                <a href="{{ route('demo.enter') }}" class="mobile-nav-link !bg-amber-500/15 !border-amber-400/30 text-amber-300 font-bold">
+                    <span class="text-lg">⚡</span>
+                    <span>{{ $isEn ? 'Live Demo (Sandbox)' : 'تجربة النظام الحي (Demo)' }}</span>
                 </a>
                 <a href="{{ route('offers.index') }}" class="mobile-nav-link">
                     <span class="text-lg">🏷️</span>

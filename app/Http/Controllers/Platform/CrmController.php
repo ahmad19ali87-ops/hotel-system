@@ -192,6 +192,67 @@ class CrmController extends Controller
     }
 
     /**
+     * Update an existing subscription plan.
+     */
+    public function updatePlan(Request $request, SubscriptionPlan $plan)
+    {
+        $this->authorizePlatform();
+
+        $validated = $request->validate([
+            'name' => 'required|string|max:255',
+            'slug' => 'nullable|string|max:100',
+            'description' => 'nullable|string|max:1000',
+            'price_monthly_syp' => 'required|numeric|min:0',
+            'price_yearly_syp' => 'required|numeric|min:0',
+            'price_monthly_usd' => 'required|numeric|min:0',
+            'price_yearly_usd' => 'required|numeric|min:0',
+            'max_rooms' => 'required|integer',
+            'max_users' => 'required|integer',
+            'badge' => 'nullable|string|max:50',
+            'features' => 'nullable|string',
+            'is_active' => 'nullable|boolean',
+            'sort_order' => 'nullable|integer',
+        ]);
+
+        $featuresList = array_filter(array_map('trim', explode("\n", str_replace("\r", "", $validated['features'] ?? ''))));
+        $slug = !empty($validated['slug']) ? Str::slug($validated['slug']) : ($plan->slug ?: Str::slug($validated['name']));
+
+        $plan->update([
+            'name' => $validated['name'],
+            'slug' => $slug,
+            'description' => $validated['description'] ?? null,
+            'price_monthly_syp' => $validated['price_monthly_syp'],
+            'price_yearly_syp' => $validated['price_yearly_syp'],
+            'price_monthly_usd' => $validated['price_monthly_usd'],
+            'price_yearly_usd' => $validated['price_yearly_usd'],
+            'max_rooms' => $validated['max_rooms'],
+            'max_users' => $validated['max_users'],
+            'features' => array_values($featuresList),
+            'badge' => $validated['badge'] ?? null,
+            'is_active' => $request->has('is_active'),
+            'sort_order' => $validated['sort_order'] ?? 0,
+        ]);
+
+        return redirect()->route('platform.crm.index', ['tab' => 'subscriptions'])->with('success', "تم تحديث باقة ({$plan->name}) بنجاح.");
+    }
+
+    /**
+     * Delete or deactivate an existing subscription plan.
+     */
+    public function destroyPlan(SubscriptionPlan $plan)
+    {
+        $this->authorizePlatform();
+
+        if ($plan->subscriptions()->where('status', 'active')->exists()) {
+            $plan->update(['is_active' => false]);
+            return redirect()->route('platform.crm.index', ['tab' => 'subscriptions'])->with('success', "تم إلغاء تفعيل باقة ({$plan->name}) لوجود اشتراكات نشطة عليها.");
+        }
+
+        $plan->delete();
+        return redirect()->route('platform.crm.index', ['tab' => 'subscriptions'])->with('success', 'تم حذف الباقة بنجاح.');
+    }
+
+    /**
      * Assign or renew a hotel subscription.
      */
     public function assignSubscription(Request $request)
@@ -410,11 +471,57 @@ class CrmController extends Controller
     }
 
     /**
+     * Public Pricing & Subscription Plans view for visitors and prospective hotel owners.
+     */
+    public function publicPricing(Request $request)
+    {
+        if ($request->wantsJson() || $request->filled('check_code')) {
+            $code = strtoupper(trim((string) $request->input('check_code')));
+            $campaign = MarketingCampaign::where('code', $code)->where('is_active', true)->first();
+            if ($campaign && $campaign->isValidNow()) {
+                return response()->json([
+                    'valid' => true,
+                    'code' => $campaign->code,
+                    'title' => $campaign->title,
+                    'discount_percent' => $campaign->discount_percent,
+                    'discount_fixed' => $campaign->discount_fixed,
+                    'currency' => $campaign->currency,
+                    'message' => 'كود الخصم فعال وصالح للاستخدام!',
+                ]);
+            }
+            return response()->json([
+                'valid' => false,
+                'message' => 'كود الخصم غير صحيح أو منتهي الصلاحية.',
+            ], 404);
+        }
+
+        $plans = SubscriptionPlan::where('is_active', true)
+            ->orderBy('sort_order')
+            ->orderBy('price_monthly_usd')
+            ->get();
+
+        $activeCampaigns = MarketingCampaign::where('is_active', true)->get()->filter->isValidNow();
+
+        return view('public.pricing', compact('plans', 'activeCampaigns'));
+    }
+
+    /**
      * Store Marketing Campaign / Coupon Code.
      */
     public function storeCampaign(Request $request)
     {
         $this->authorizePlatform();
+
+        $code = strtoupper(trim((string) $request->input('code')));
+        $request->merge([
+            'code' => $code,
+            'ends_at' => $request->filled('ends_at') ? $request->input('ends_at') : null,
+            'starts_at' => $request->filled('starts_at') ? $request->input('starts_at') : now()->toDateString(),
+            'currency' => $request->input('currency', 'USD'),
+            'type' => $request->input('type', 'discount_coupon'),
+            'discount_percent' => $request->filled('discount_percent') ? (float)$request->discount_percent : 0,
+            'discount_fixed' => $request->filled('discount_fixed') ? (float)$request->discount_fixed : 0,
+        ]);
 
         $validated = $request->validate([
             'title' => 'required|string|max:255',
@@ -424,26 +531,91 @@ class CrmController extends Controller
             'currency' => 'required|in:USD,SYP',
             'type' => 'required|string|max:50',
             'starts_at' => 'nullable|date',
-            'ends_at' => 'nullable|date|after_or_equal:starts_at',
+            'ends_at' => 'nullable|date',
             'max_uses' => 'nullable|integer',
             'description' => 'nullable|string|max:1000',
         ]);
 
+        if (empty($validated['discount_percent']) && empty($validated['discount_fixed'])) {
+            return back()->withInput()->with('error', 'يرجى تحديد نسبة الخصم المئوية أو قيمة الخصم الثابتة.');
+        }
+
         MarketingCampaign::create([
             'title' => $validated['title'],
-            'code' => strtoupper(trim($validated['code'])),
+            'code' => $validated['code'],
             'discount_percent' => $validated['discount_percent'] ?? 0,
             'discount_fixed' => $validated['discount_fixed'] ?? 0,
             'currency' => $validated['currency'],
             'type' => $validated['type'],
-            'starts_at' => $validated['starts_at'] ?? now()->toDateString(),
-            'ends_at' => $validated['ends_at'] ?? null,
+            'starts_at' => $validated['starts_at'],
+            'ends_at' => $validated['ends_at'],
             'max_uses' => $validated['max_uses'] ?? -1,
             'description' => $validated['description'] ?? null,
             'is_active' => true,
         ]);
 
-        return redirect()->route('platform.crm.index', ['tab' => 'marketing'])->with('success', 'تم إطلاق الحملة الترويجية وكود الخصم بنجاح.');
+        $tab = $request->input('redirect_tab', 'subscriptions');
+        return redirect()->route('platform.crm.index', ['tab' => $tab])->with('success', 'تم حفظ وتفعيل كود الخصم الجديد بنجاح.');
+    }
+
+    /**
+     * Update an existing Marketing Campaign / Coupon Code.
+     */
+    public function updateCampaign(Request $request, MarketingCampaign $campaign)
+    {
+        $this->authorizePlatform();
+
+        $code = strtoupper(trim((string) $request->input('code')));
+        $request->merge([
+            'code' => $code,
+            'ends_at' => $request->filled('ends_at') ? $request->input('ends_at') : null,
+            'starts_at' => $request->filled('starts_at') ? $request->input('starts_at') : ($campaign->starts_at?->toDateString() ?: now()->toDateString()),
+            'currency' => $request->input('currency', $campaign->currency ?: 'USD'),
+            'type' => $request->input('type', $campaign->type ?: 'discount_coupon'),
+            'discount_percent' => $request->filled('discount_percent') ? (float)$request->discount_percent : 0,
+            'discount_fixed' => $request->filled('discount_fixed') ? (float)$request->discount_fixed : 0,
+        ]);
+
+        $validated = $request->validate([
+            'title' => 'required|string|max:255',
+            'code' => ['required', 'string', 'max:50', \Illuminate\Validation\Rule::unique('marketing_campaigns', 'code')->ignore($campaign->id)],
+            'discount_percent' => 'nullable|numeric|min:0|max:100',
+            'discount_fixed' => 'nullable|numeric|min:0',
+            'currency' => 'required|in:USD,SYP',
+            'type' => 'required|string|max:50',
+            'starts_at' => 'nullable|date',
+            'ends_at' => 'nullable|date',
+            'max_uses' => 'nullable|integer',
+            'description' => 'nullable|string|max:1000',
+        ]);
+
+        $campaign->update([
+            'title' => $validated['title'],
+            'code' => $validated['code'],
+            'discount_percent' => $validated['discount_percent'] ?? 0,
+            'discount_fixed' => $validated['discount_fixed'] ?? 0,
+            'currency' => $validated['currency'],
+            'type' => $validated['type'],
+            'starts_at' => $validated['starts_at'],
+            'ends_at' => $validated['ends_at'],
+            'max_uses' => $validated['max_uses'] ?? -1,
+            'description' => $validated['description'] ?? null,
+            'is_active' => $request->has('is_active') ? $request->boolean('is_active') : $campaign->is_active,
+        ]);
+
+        $tab = $request->input('redirect_tab', 'subscriptions');
+        return redirect()->route('platform.crm.index', ['tab' => $tab])->with('success', 'تم تحديث كود الخصم بنجاح.');
+    }
+
+    /**
+     * Delete a Marketing Campaign / Coupon Code.
+     */
+    public function destroyCampaign(Request $request, MarketingCampaign $campaign)
+    {
+        $this->authorizePlatform();
+        $campaign->delete();
+        $tab = $request->input('redirect_tab', 'marketing');
+        return redirect()->route('platform.crm.index', ['tab' => $tab])->with('success', 'تم حذف كود الخصم بنجاح.');
     }
 
     /**

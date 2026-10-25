@@ -46,15 +46,29 @@ class PlatformCrmAndSubscriptionTest extends TestCase
             });
         }
 
+        if (!Schema::hasTable('room_types')) {
+            Schema::create('room_types', function (Blueprint $table) {
+                $table->id();
+                $table->foreignId('hotel_id');
+                $table->string('name');
+                $table->decimal('base_price', 10, 2)->default(0);
+                $table->text('description')->nullable();
+                $table->timestamps();
+            });
+        }
+
         if (!Schema::hasTable('rooms')) {
             Schema::create('rooms', function (Blueprint $table) {
                 $table->id();
                 $table->foreignId('hotel_id');
+                $table->foreignId('room_type_id')->nullable();
                 $table->string('room_number');
-                $table->string('type');
+                $table->string('type')->default('standard');
                 $table->decimal('price', 10, 2);
+                $table->decimal('price_syp', 10, 2)->default(0);
                 $table->decimal('price_usd', 10, 2)->default(0);
                 $table->string('status')->default('available');
+                $table->boolean('needs_cleaning')->default(false);
                 $table->unsignedSmallInteger('floor')->default(1);
                 $table->unsignedTinyInteger('capacity')->default(2);
                 $table->text('description')->nullable();
@@ -87,6 +101,8 @@ class PlatformCrmAndSubscriptionTest extends TestCase
                 $table->foreignId('hotel_id');
                 $table->string('name');
                 $table->string('phone')->nullable();
+                $table->string('email')->nullable();
+                $table->string('id_type')->nullable();
                 $table->string('id_number')->nullable();
                 $table->string('nationality')->nullable();
                 $table->timestamps();
@@ -618,4 +634,178 @@ class PlatformCrmAndSubscriptionTest extends TestCase
         $res = $this->actingAs($guest)->get('/platform/crm');
         $res->assertStatus(403);
     }
+
+
+    public function test_public_pricing_page_and_promo_validation(): void
+    {
+        $plan = SubscriptionPlan::create([
+            'name' => 'الباقة الفندقية المتقدمة',
+            'slug' => 'advanced-hotel-plan',
+            'price_monthly_usd' => 80,
+            'price_yearly_usd' => 800,
+            'price_monthly_syp' => 1200000,
+            'price_yearly_syp' => 12000000,
+            'max_rooms' => 50,
+            'max_users' => 10,
+            'features' => ['أتمتة الفواتير', 'الربط المالي'],
+            'is_active' => true,
+        ]);
+
+        $camp = MarketingCampaign::create([
+            'title' => 'كود ترويجي تجريبي',
+            'code' => 'TESTCODE20',
+            'discount_percent' => 20,
+            'discount_fixed' => 0,
+            'currency' => 'USD',
+            'starts_at' => now()->toDateString(),
+            'ends_at' => null,
+            'max_uses' => 100,
+            'is_active' => true,
+        ]);
+
+        $res = $this->get('/pricing');
+        $res->assertStatus(200);
+        $res->assertSee('الباقة الفندقية المتقدمة');
+
+        $promoRes = $this->getJson('/pricing?check_code=TESTCODE20');
+        $promoRes->assertStatus(200);
+        $promoRes->assertJson([
+            'valid' => true,
+            'code' => 'TESTCODE20',
+            'discount_percent' => 20,
+        ]);
+    }
+
+    public function test_demo_flow_enter_reset_and_exit(): void
+    {
+        // 1. Enter demo mode
+        $enterRes = $this->get('/demo');
+        $enterRes->assertRedirect(route('admin.dashboard'));
+        $this->assertTrue(session('is_demo_session') === true);
+
+        // Demo user should be authenticated
+        $this->assertAuthenticated();
+        $user = auth()->user();
+        $this->assertEquals('demo@hotel-system.local', $user->email);
+
+        $demoHotel = Hotel::where('slug', 'demo-hotel')->first();
+        $this->assertNotNull($demoHotel);
+        $this->assertFalse((bool)$demoHotel->is_visible);
+
+        // 2. Reset demo data
+        $resetRes = $this->post('/demo/reset');
+        $resetRes->assertSessionHas('success');
+
+        // 3. Exit demo mode
+        $exitRes = $this->post('/demo/exit');
+        $exitRes->assertRedirect(route('home'));
+        $this->assertGuest();
+        $this->assertNull(Hotel::where('slug', 'demo-hotel')->first());
+    }
+
+    public function test_subscription_plan_editing_and_campaign_creation_with_empty_ends_at(): void
+    {
+        $superAdmin = User::create([
+            'name' => 'Super Platform Admin',
+            'email' => 'super@platform.crm',
+            'password' => bcrypt('secret123'),
+            'role' => 'super_admin',
+            'is_verified' => true,
+        ]);
+
+        $plan = SubscriptionPlan::create([
+            'name' => 'باقة قابلة للتعديل',
+            'slug' => 'editable-plan',
+            'price_monthly_usd' => 50,
+            'price_yearly_usd' => 500,
+            'price_monthly_syp' => 750000,
+            'price_yearly_syp' => 7500000,
+            'max_rooms' => 20,
+            'max_users' => 5,
+            'features' => ['ميزة أ'],
+            'is_active' => true,
+        ]);
+
+        // 1. Update Plan
+        $updateRes = $this->actingAs($superAdmin)->put("/platform/crm/plans/{$plan->id}", [
+            'name' => 'باقة معدلة ممتازة',
+            'badge' => 'الأفضل ⭐',
+            'description' => 'وصف معدل',
+            'price_monthly_usd' => 60,
+            'price_yearly_usd' => 600,
+            'price_monthly_syp' => 900000,
+            'price_yearly_syp' => 9000000,
+            'max_rooms' => 30,
+            'max_users' => 8,
+            'features' => "ميزة أ\nميزة ب",
+            'is_active' => 1,
+        ]);
+
+        $updateRes->assertRedirect(route('platform.crm.index', ['tab' => 'subscriptions']));
+        $this->assertDatabaseHas('subscription_plans', [
+            'id' => $plan->id,
+            'name' => 'باقة معدلة ممتازة',
+            'price_monthly_usd' => 60,
+        ]);
+
+        // 2. Create Campaign with empty ends_at (previously failed validation)
+        $campRes = $this->actingAs($superAdmin)->post('/platform/crm/campaigns', [
+            'title' => 'كود دائم بلا تاريخ انتهاء',
+            'code' => 'forever15',
+            'discount_percent' => 15,
+            'discount_fixed' => 0,
+            'currency' => 'USD',
+            'starts_at' => now()->toDateString(),
+            'ends_at' => '', // Empty string must be accepted as null!
+            'max_uses' => 50,
+            'redirect_tab' => 'subscriptions',
+        ]);
+
+        $campRes->assertRedirect(route('platform.crm.index', ['tab' => 'subscriptions']));
+        $this->assertDatabaseHas('marketing_campaigns', [
+            'code' => 'FOREVER15',
+            'discount_percent' => 15,
+            'ends_at' => null,
+        ]);
+
+        $createdCamp = MarketingCampaign::where('code', 'FOREVER15')->first();
+
+        // 3. Update Campaign
+        $updateCampRes = $this->actingAs($superAdmin)->put("/platform/crm/campaigns/{$createdCamp->id}", [
+            'title' => 'كود دائم معدل',
+            'code' => 'FOREVER25',
+            'discount_percent' => 25,
+            'discount_fixed' => 0,
+            'currency' => 'USD',
+            'starts_at' => now()->toDateString(),
+            'ends_at' => '',
+            'max_uses' => 70,
+            'is_active' => 1,
+            'redirect_tab' => 'subscriptions',
+        ]);
+
+        $updateCampRes->assertRedirect(route('platform.crm.index', ['tab' => 'subscriptions']));
+        $this->assertDatabaseHas('marketing_campaigns', [
+            'id' => $createdCamp->id,
+            'code' => 'FOREVER25',
+            'discount_percent' => 25,
+        ]);
+
+        // 4. Delete Campaign
+        $delCampRes = $this->actingAs($superAdmin)->delete("/platform/crm/campaigns/{$createdCamp->id}", [
+            'redirect_tab' => 'subscriptions',
+        ]);
+        $delCampRes->assertRedirect(route('platform.crm.index', ['tab' => 'subscriptions']));
+        $this->assertDatabaseMissing('marketing_campaigns', [
+            'id' => $createdCamp->id,
+        ]);
+
+        // 5. Delete Plan
+        $delPlanRes = $this->actingAs($superAdmin)->delete("/platform/crm/plans/{$plan->id}");
+        $delPlanRes->assertRedirect(route('platform.crm.index', ['tab' => 'subscriptions']));
+        $this->assertDatabaseMissing('subscription_plans', [
+            'id' => $plan->id,
+        ]);
+    }
 }
+

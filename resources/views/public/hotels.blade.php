@@ -11,22 +11,60 @@
         $heroSubtitle = \App\Models\SiteSetting::get('hero_subtitle', 'بأعلى معايير الضيافة العالمية');
         $heroDesc = \App\Models\SiteSetting::get('hero_description', 'اختر من بين أفخم الفنادق والوجهات السياحية، استعرض الغرف المتوفرة لحظياً، واستمتع بخيارات تسعير منفصلة بالليرة السورية والدولار الأمريكي مع تأكيد فوري للحجز.');
     @endphp
-    <section class="relative bg-gradient-to-bl from-slate-950 via-slate-900 to-blue-950 text-white pt-16 pb-28 px-4 overflow-hidden">
-        {{-- Optional Custom Cover Image --}}
-        @if($heroCover)
-            <img src="{{ $heroCover }}" alt="Cover" class="absolute inset-0 h-full w-full object-cover opacity-25">
-        @endif
 
-        {{-- Background Geometric Patterns & Glow --}}
-        <div class="absolute inset-0 opacity-15 pointer-events-none">
-            <div class="absolute -top-24 -right-24 w-96 h-96 rounded-full bg-blue-500 blur-3xl"></div>
-            <div class="absolute -bottom-24 -left-24 w-96 h-96 rounded-full bg-amber-500 blur-3xl"></div>
-            <div class="absolute inset-0" style="background-image: radial-gradient(rgba(255,255,255,0.1) 1px, transparent 1px); background-size: 24px 24px;"></div>
+    <style>
+        @keyframes heroKenBurns1 {
+            0% { opacity: 0; transform: scale(1); }
+            8% { opacity: 1; }
+            28% { opacity: 1; transform: scale(1.08); }
+            36% { opacity: 0; transform: scale(1.12); }
+            100% { opacity: 0; }
+        }
+        @keyframes heroKenBurns2 {
+            0%, 28% { opacity: 0; transform: scale(1); }
+            36% { opacity: 1; }
+            58% { opacity: 1; transform: scale(1.08); }
+            66% { opacity: 0; transform: scale(1.12); }
+            100% { opacity: 0; }
+        }
+        @keyframes heroKenBurns3 {
+            0%, 58% { opacity: 0; transform: scale(1); }
+            66% { opacity: 1; }
+            88% { opacity: 1; transform: scale(1.08); }
+            96% { opacity: 0; transform: scale(1.12); }
+            100% { opacity: 0; }
+        }
+        .hero-slide-1 { animation: heroKenBurns1 24s infinite ease-in-out; }
+        .hero-slide-2 { animation: heroKenBurns2 24s infinite ease-in-out; }
+        .hero-slide-3 { animation: heroKenBurns3 24s infinite ease-in-out; }
+    </style>
+
+    <section class="relative bg-gradient-to-bl from-slate-950 via-slate-900 to-blue-950 text-white pt-16 pb-28 px-4 overflow-hidden min-h-[580px] flex items-center">
+        {{-- Background Video Layer --}}
+        <video autoplay loop muted playsinline class="absolute inset-0 h-full w-full object-cover opacity-35 pointer-events-none" poster="{{ $heroCover ?: 'https://images.unsplash.com/photo-1542314831-068cd1dbfeeb?auto=format&fit=crop&w=1920&q=80' }}">
+            <source src="https://assets.mixkit.co/videos/preview/mixkit-luxury-resort-with-swimming-pool-and-palm-trees-39722-large.mp4" type="video/mp4">
+        </video>
+
+        {{-- Background Ken-Burns Animated Visual Showcase (Fallback / Supplement) --}}
+        <div class="absolute inset-0 pointer-events-none overflow-hidden">
+            <div class="hero-slide-1 absolute inset-0 bg-cover bg-center opacity-30 mix-blend-overlay" style="background-image: url('https://images.unsplash.com/photo-1542314831-068cd1dbfeeb?auto=format&fit=crop&w=1920&q=80');"></div>
+            <div class="hero-slide-2 absolute inset-0 bg-cover bg-center opacity-30 mix-blend-overlay" style="background-image: url('https://images.unsplash.com/photo-1566073771259-6a8506099945?auto=format&fit=crop&w=1920&q=80');"></div>
+            <div class="hero-slide-3 absolute inset-0 bg-cover bg-center opacity-30 mix-blend-overlay" style="background-image: url('https://images.unsplash.com/photo-1582719508461-905c673771fd?auto=format&fit=crop&w=1920&q=80');"></div>
         </div>
 
-        <div class="relative mx-auto max-w-6xl text-center">
+        {{-- Dark Luxury Overlay & Ambient Glow Gradients --}}
+        <div class="absolute inset-0 bg-gradient-to-b from-slate-950/80 via-slate-950/70 to-slate-950/90 backdrop-blur-[2px]"></div>
+        <div class="absolute inset-0 opacity-20 pointer-events-none">
+            <div class="absolute -top-24 -right-24 w-96 h-96 rounded-full bg-blue-500 blur-3xl"></div>
+            <div class="absolute -bottom-24 -left-24 w-96 h-96 rounded-full bg-amber-500 blur-3xl"></div>
+            <div class="absolute inset-0" style="background-image: radial-gradient(rgba(255,255,255,0.08) 1px, transparent 1px); background-size: 24px 24px;"></div>
+        </div>
+
+        <div class="relative mx-auto max-w-6xl text-center z-10 w-full">
+            {{-- Floating Promo Badge --}}
             @if($heroBadge)
-                <div class="inline-flex items-center gap-2 rounded-full border border-blue-400/30 bg-blue-500/10 px-4 py-1.5 text-xs font-semibold text-blue-300 backdrop-blur-md mb-6">
+                <div class="inline-flex items-center gap-2 rounded-full border border-blue-400/30 bg-blue-500/15 px-4 py-1.5 text-xs font-semibold text-blue-300 backdrop-blur-md mb-6 shadow-sm">
+                    <span class="inline-block animate-pulse">✨</span>
                     <span>{{ $heroBadge }}</span>
                 </div>
             @endif
@@ -42,10 +80,57 @@
             </h1>
 
             @if($heroDesc)
-                <p class="mx-auto max-w-2xl text-slate-300 text-sm sm:text-base leading-relaxed mb-8">
+                <p class="mx-auto max-w-3xl text-slate-300 text-sm sm:text-base leading-relaxed mb-6 font-medium">
                     {{ $heroDesc }}
                 </p>
             @endif
+
+            {{-- Feature Showcase Chips --}}
+            <div class="flex flex-wrap items-center justify-center gap-2 mb-8 text-xs text-slate-300">
+                <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/10 border border-white/10 backdrop-blur-md">
+                    <span class="text-emerald-400">●</span> حجز فوري مؤكد
+                </span>
+                <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/10 border border-white/10 backdrop-blur-md">
+                    <span class="text-blue-400">●</span> تسعير منفصل بالليرة السورية والدولار
+                </span>
+                <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/10 border border-white/10 backdrop-blur-md">
+                    <span class="text-amber-400">●</span> فواتير بباركود إلكتروني لمجلد الفندق
+                </span>
+                <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/10 border border-white/10 backdrop-blur-md">
+                    <span class="text-purple-400">●</span> تطبيق سطح مكتب + ويب متزامن
+                </span>
+            </div>
+
+            {{-- Call To Action Button Group (Demo, Pricing, Search) --}}
+            <div class="flex flex-wrap items-center justify-center gap-3">
+                {{-- Live Demo Button --}}
+                <a href="{{ route('demo.enter') }}" class="group relative inline-flex items-center gap-3 px-6 py-3.5 rounded-2xl bg-gradient-to-r from-amber-500 via-amber-400 to-yellow-500 text-slate-950 font-black text-sm sm:text-base shadow-xl shadow-amber-500/30 hover:shadow-amber-500/50 hover:scale-105 active:scale-95 transition-all duration-300 text-decoration-none">
+                    <span class="inline-flex items-center justify-center h-7 w-7 rounded-xl bg-slate-950 text-amber-300 text-xs shadow-inner group-hover:rotate-12 transition">⚡</span>
+                    <div class="text-end">
+                        <span class="block leading-tight font-black text-slate-950">تجربة النظام الحي (Demo)</span>
+                        <span class="block text-[11px] font-bold text-slate-900/80">دخول فوري بدون تسجيل للوحة فندق</span>
+                    </div>
+                    <span class="text-xs transition-transform group-hover:-translate-x-1">➔</span>
+                </a>
+
+                {{-- Pricing & Subscriptions Button --}}
+                <a href="{{ route('pricing') }}" class="inline-flex items-center gap-2 px-5 py-3.5 rounded-2xl bg-white/10 hover:bg-white/20 text-white font-bold text-sm sm:text-base backdrop-blur-md border border-white/20 hover:border-white/40 transition-all duration-200 text-decoration-none">
+                    <span>💳</span>
+                    <span>خطط وباقات الاشتراك</span>
+                </a>
+
+                {{-- Hotel Booking Direct Button --}}
+                <a href="#bookingSearchForm" class="inline-flex items-center gap-2 px-5 py-3.5 rounded-2xl bg-blue-600/80 hover:bg-blue-600 text-white font-bold text-sm sm:text-base backdrop-blur-md border border-blue-400/30 transition-all duration-200 text-decoration-none">
+                    <span>🏨</span>
+                    <span>ابحث واحجز فندقك الآن</span>
+                </a>
+            </div>
+
+            {{-- Safe Sandbox Guarantee Note --}}
+            <div class="mt-4 inline-flex items-center gap-2 text-xs text-amber-200/90 font-medium px-4 py-1.5 rounded-full bg-slate-900/70 border border-amber-400/20 backdrop-blur-md">
+                <span class="text-emerald-400 font-bold">✓</span>
+                <span>بيئة تجريبية معزولة: يمكنك اختبار إدارة الغرف والحجوزات والفواتير بكل حرية، وتُحذف كافة بيانات التجربة تلقائياً عند الخروج.</span>
+            </div>
         </div>
     </section>
 
