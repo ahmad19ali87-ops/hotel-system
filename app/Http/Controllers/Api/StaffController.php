@@ -599,6 +599,7 @@ class StaffController extends Controller
             'room_id' => ['required', 'integer', Rule::exists('rooms', 'id')->where('hotel_id', $hotelId)],
             'guest_name' => ['required', 'string', 'max:255'],
             'guest_phone' => ['nullable', 'string', 'max:40'],
+            'guest_email' => ['nullable', 'email', 'max:255'],
             'guest_id' => ['nullable', 'exists:guests,id'],
             'check_in' => ['required', 'date'],
             'check_out' => ['required', 'date', 'after:check_in'],
@@ -664,8 +665,13 @@ class StaffController extends Controller
             'status' => $bookingStatus,
         ]);
 
+        if (!empty($guest->email)) {
+            \App\Services\GuestStayNotificationService::ensureUserForGuest($guest);
+        }
+
         if ($bookingStatus === 'checked_in') {
             $room->update(['status' => 'occupied']);
+            \App\Services\GuestStayNotificationService::sendCheckInEmail($booking);
         } else {
             $room->update(['status' => 'booked']);
         }
@@ -744,6 +750,9 @@ class StaffController extends Controller
                 ['booking_id' => $booking->id]
             );
         }
+
+        // إرسال بريد إلكتروني تفصيلي بتسجيل الوصول وتفاصيل الحساب والتطبيق
+        \App\Services\GuestStayNotificationService::sendCheckInEmail($booking);
 
         return response()->json([
             'status' => 'success',
@@ -858,6 +867,9 @@ class StaffController extends Controller
             );
         }
 
+        // إرسال بريد إلكتروني تفصيلي بتسجيل المغادرة والفاتورة الإلكترونية والتطبيق
+        \App\Services\GuestStayNotificationService::sendCheckOutEmail($booking, $invoice);
+
         return response()->json([
             'status' => 'success',
             'message' => 'تم تسجيل مغادرة النزيل، تحويل الغرفة لقسم التنظيف، وتسجيل الفاتورة والإيراد بنجاح.',
@@ -963,6 +975,7 @@ class StaffController extends Controller
             'room_id' => ['nullable', 'integer', Rule::exists('rooms', 'id')->where('hotel_id', $hotelId)],
             'guest_name' => ['nullable', 'string', 'max:255'],
             'guest_phone' => ['nullable', 'string', 'max:40'],
+            'guest_email' => ['nullable', 'email', 'max:255'],
             'total_price' => ['nullable', 'numeric'],
             'currency' => ['nullable', 'string', 'in:SYP,USD'],
             'status' => ['nullable', 'string', 'in:pending,confirmed,checked_in,checked_out,cancelled'],
@@ -973,11 +986,19 @@ class StaffController extends Controller
             ? Room::where('hotel_id', $hotelId)->findOrFail($request->room_id)
             : $booking->room;
 
-        if ($booking->guest && $request->filled('guest_name')) {
-            $booking->guest->update([
-                'name' => $request->guest_name,
-                'phone' => $request->guest_phone ?? $booking->guest->phone,
-            ]);
+        $oldBookingStatus = $booking->status;
+
+        if ($booking->guest) {
+            $gUpdates = [];
+            if ($request->filled('guest_name')) $gUpdates['name'] = $request->guest_name;
+            if ($request->filled('guest_phone')) $gUpdates['phone'] = $request->guest_phone;
+            if ($request->filled('guest_email')) $gUpdates['email'] = $request->guest_email;
+            if (!empty($gUpdates)) {
+                $booking->guest->update($gUpdates);
+                if (!empty($booking->guest->email)) {
+                    \App\Services\GuestStayNotificationService::ensureUserForGuest($booking->guest);
+                }
+            }
         }
 
         $currency = $request->input('currency', $booking->currency ?: 'USD');
@@ -1001,6 +1022,12 @@ class StaffController extends Controller
             'status' => $status,
             'notes' => $request->input('notes', $booking->notes),
         ]);
+
+        if ($oldBookingStatus !== 'checked_in' && $status === 'checked_in') {
+            \App\Services\GuestStayNotificationService::sendCheckInEmail($booking);
+        } elseif ($oldBookingStatus !== 'checked_out' && $status === 'checked_out') {
+            \App\Services\GuestStayNotificationService::sendCheckOutEmail($booking);
+        }
 
         if ($status === 'checked_in') {
             $room?->update(['status' => 'occupied']);

@@ -108,6 +108,8 @@ Room::where('hotel_id', $hotel->id)->get();
             $booking->room->update(['status' => 'reserved']);
         }
 
+        \App\Services\GuestStayNotificationService::sendCheckInEmail($booking);
+
         return back()->with('success', 'تم تسجيل الدخول بنجاح.');
     }
 
@@ -124,6 +126,8 @@ Room::where('hotel_id', $hotel->id)->get();
         if ($booking->room) {
             $booking->room->update(['status' => 'available']);
         }
+
+        \App\Services\GuestStayNotificationService::sendCheckOutEmail($booking);
 
         return back()->with('success', 'تم تسجيل الخروج بنجاح.');
     }

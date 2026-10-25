@@ -33,6 +33,14 @@
             <input type="text" name="guest_phone" class="form-control" value="{{ old('guest_phone', $booking->guest?->phone ?? $booking->guest_phone) }}">
         </div>
 
+        <div class="mb-3">
+            <label class="form-label">البريد الإلكتروني للنزيل (اختياري)</label>
+            <input type="email" name="guest_email" class="form-control" value="{{ old('guest_email', $booking->guest?->email) }}" placeholder="guest@example.com">
+            <div class="form-text text-muted">
+                يصل النزيل عبر هذا البريد إشعار فوري عند تسجيل الدخول والخروج مع الفاتورة الإلكترونية، ورابط تعيين كلمة المرور لتفعيل حسابه.
+            </div>
+        </div>
+
         <div class="row">
             <div class="col-md-6 mb-3">
                 <label class="form-label">تاريخ الدخول</label>

@@ -47,6 +47,7 @@ class BookingController extends Controller
             'room_id' => ['required', 'integer', Rule::exists('rooms', 'id')->where('hotel_id', $hotelId)],
             'guest_name' => ['required', 'string', 'max:255'],
             'guest_phone' => ['nullable', 'string', 'max:40'],
+            'guest_email' => ['nullable', 'email', 'max:255'],
             'check_in' => ['required', 'date', 'after_or_equal:today'],
             'check_out' => ['required', 'date', 'after:check_in'],
             'currency' => ['nullable', 'string', 'in:SYP,USD'],
@@ -63,7 +64,12 @@ class BookingController extends Controller
                 'hotel_id' => $hotelId,
                 'name' => $validated['guest_name'],
                 'phone' => $validated['guest_phone'] ?? null,
+                'email' => $validated['guest_email'] ?? null,
             ]);
+
+            if (!empty($guest->email)) {
+                \App\Services\GuestStayNotificationService::ensureUserForGuest($guest);
+            }
 
             $currency = $validated['currency'] ?? 'SYP';
             $days = max(1, now()->parse($validated['check_in'])->diffInDays($validated['check_out']));
@@ -106,11 +112,14 @@ class BookingController extends Controller
             'room_id' => ['required', 'integer', Rule::exists('rooms', 'id')->where('hotel_id', $hotelId)],
             'guest_name' => ['required', 'string', 'max:255'],
             'guest_phone' => ['nullable', 'string', 'max:40'],
+            'guest_email' => ['nullable', 'email', 'max:255'],
             'check_in' => ['required', 'date'],
             'check_out' => ['required', 'date', 'after:check_in'],
             'currency' => ['nullable', 'string', 'in:SYP,USD'],
             'status' => ['required', Rule::in(['pending', 'confirmed', 'checked_in', 'checked_out', 'cancelled'])],
         ]);
+
+        $oldStatus = $booking->status;
 
         DB::transaction(function () use ($booking, $validated, $hotelId) {
             $room = Room::where('hotel_id', $hotelId)->whereKey($validated['room_id'])->firstOrFail();
@@ -118,9 +127,17 @@ class BookingController extends Controller
             if (! $guest) {
                 $guest = new Guest(['hotel_id' => $hotelId]);
             }
-            $guest->fill(['name' => $validated['guest_name'], 'phone' => $validated['guest_phone'] ?? null]);
+            $guest->fill([
+                'name' => $validated['guest_name'],
+                'phone' => $validated['guest_phone'] ?? null,
+                'email' => $validated['guest_email'] ?? $guest->email,
+            ]);
             $guest->hotel_id = $hotelId;
             $guest->save();
+
+            if (!empty($guest->email)) {
+                \App\Services\GuestStayNotificationService::ensureUserForGuest($guest);
+            }
 
             $currency = $validated['currency'] ?? ($booking->currency ?: 'SYP');
             $days = max(1, now()->parse($validated['check_in'])->diffInDays($validated['check_out']));
@@ -139,6 +156,12 @@ class BookingController extends Controller
                 'status' => $validated['status'],
             ]);
         });
+
+        if ($oldStatus !== 'checked_in' && $validated['status'] === 'checked_in') {
+            \App\Services\GuestStayNotificationService::sendCheckInEmail($booking);
+        } elseif ($oldStatus !== 'checked_out' && $validated['status'] === 'checked_out') {
+            \App\Services\GuestStayNotificationService::sendCheckOutEmail($booking);
+        }
 
         return redirect()->route('bookings.index')->with('status', 'تم تحديث بيانات الحجز بنجاح.');
     }
@@ -259,6 +282,9 @@ class BookingController extends Controller
 
         $booking->update(['status' => 'checked_in']);
         $booking->room()->update(['status' => 'reserved']);
+
+        // إرسال إشعار وتسجيل الدخول عبر البريد الإلكتروني للنزيل
+        \App\Services\GuestStayNotificationService::sendCheckInEmail($booking);
 
         $booking->loadMissing(['hotel', 'guest.user', 'room']);
         $guestUser = $booking->guest?->user;
@@ -407,6 +433,9 @@ class BookingController extends Controller
 
         $invoice = Invoice::with(['hotel', 'booking.guest', 'room', 'payments'])->findOrFail($invoiceId);
         $pdfService->store($invoice);
+
+        // إرسال إشعار تسجيل الخروج والفاتورة الإلكترونية للنزيل
+        \App\Services\GuestStayNotificationService::sendCheckOutEmail($booking, $invoice);
 
         $booking->loadMissing(['hotel', 'guest.user', 'room']);
         $guestUser = $booking->guest?->user;

@@ -28,13 +28,21 @@
         </div>
 
         <div class="mb-3">
-            <label>اسم العميل</label>
-            <input type="text" name="guest_name" class="form-control">
+            <label class="form-label fw-bold">اسم العميل / النزيل *</label>
+            <input type="text" name="guest_name" class="form-control" value="{{ old('guest_name') }}" required>
         </div>
 
         <div class="mb-3">
-            <label>هاتف العميل</label>
-            <input type="text" name="guest_phone" class="form-control">
+            <label class="form-label fw-bold">هاتف العميل</label>
+            <input type="text" name="guest_phone" class="form-control" value="{{ old('guest_phone') }}" placeholder="09xxxxxxxx">
+        </div>
+
+        <div class="mb-3">
+            <label class="form-label fw-bold">البريد الإلكتروني للنزيل (اختياري)</label>
+            <input type="email" name="guest_email" class="form-control" value="{{ old('guest_email') }}" placeholder="guest@example.com">
+            <div class="form-text text-muted">
+                يصل النزيل عبر هذا البريد إشعار فوري عند تسجيل الوصول والمغادرة مع الفاتورة الإلكترونية، ورابط تفعيل حسابه في حال لم يكن مسجلاً مسبقاً.
+            </div>
         </div>
 
         <div class="mb-3">
