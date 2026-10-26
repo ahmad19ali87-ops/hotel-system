@@ -102,15 +102,11 @@ Room::where('hotel_id', $hotel->id)->get();
             return back()->with('error', 'لا يمكن تسجيل دخول لهذا الحجز.');
         }
 
-        $booking->update(['status' => 'checked_in']);
-
-        if ($booking->room) {
-            $booking->room->update(['status' => 'reserved']);
-        }
+        \App\Services\HotelStayCalculatorService::processCheckIn($booking);
 
         \App\Services\GuestStayNotificationService::sendCheckInEmail($booking);
 
-        return back()->with('success', 'تم تسجيل الدخول بنجاح.');
+        return back()->with('success', 'تم تسجيل الدخول وتحديث التاريخ الفعلي بنجاح.');
     }
 
     public function checkout($id)
@@ -121,14 +117,17 @@ Room::where('hotel_id', $hotel->id)->get();
             return back()->with('error', 'لا يمكن تسجيل خروج لهذا الحجز.');
         }
 
-        $booking->update(['status' => 'checked_out']);
+        $result = \App\Services\HotelStayCalculatorService::processCheckOut($booking);
+        $invoice = $result['invoice'];
 
-        if ($booking->room) {
-            $booking->room->update(['status' => 'available']);
+        try {
+            app(\App\Services\InvoicePdfService::class)->store($invoice);
+        } catch (\Throwable $e) {
+            // safe fallback
         }
 
-        \App\Services\GuestStayNotificationService::sendCheckOutEmail($booking);
+        \App\Services\GuestStayNotificationService::sendCheckOutEmail($booking, $invoice);
 
-        return back()->with('success', 'تم تسجيل الخروج بنجاح.');
+        return back()->with('success', 'تم تسجيل الخروج وتسوية الفاتورة بنجاح.');
     }
 }

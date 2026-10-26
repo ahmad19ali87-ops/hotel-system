@@ -280,8 +280,8 @@ class BookingController extends Controller
         $this->ensureBookingBelongsToHotel($booking);
         abort_unless($booking->status === 'confirmed', 409, 'الحجز ليس في حالة تسمح بتسجيل الدخول.');
 
-        $booking->update(['status' => 'checked_in']);
-        $booking->room()->update(['status' => 'reserved']);
+        \App\Services\HotelStayCalculatorService::processCheckIn($booking);
+
 
         // إرسال إشعار وتسجيل الدخول عبر البريد الإلكتروني للنزيل
         \App\Services\GuestStayNotificationService::sendCheckInEmail($booking);
@@ -322,7 +322,23 @@ class BookingController extends Controller
             ->with('payments')
             ->first();
 
-        return view('admin.bookings.checkout', compact('booking', 'invoice'));
+        // احتساب مدة الإقامة التلقائية بناء على دورة اليوم الفندقي (12 ظهراً إلى 12 ظهراً)
+        $inDateStr = \Carbon\Carbon::parse($booking->check_in)->toDateString();
+        $actualCheckIn = $booking->actual_check_in_at ?: \Carbon\Carbon::parse($inDateStr . ' 12:00:00');
+        $actualCheckOut = \Carbon\Carbon::now();
+        $calculatedDays = \App\Services\HotelStayCalculatorService::calculateHotelNights($actualCheckIn, $actualCheckOut);
+        $nightlyRate = \App\Services\HotelStayCalculatorService::getNightlyRate($booking);
+        $calculatedRoomAmount = round($calculatedDays * $nightlyRate, 2);
+
+        return view('admin.bookings.checkout', compact(
+            'booking',
+            'invoice',
+            'actualCheckIn',
+            'actualCheckOut',
+            'calculatedDays',
+            'nightlyRate',
+            'calculatedRoomAmount'
+        ));
     }
 
     public function checkout(Request $request, Booking $booking, InvoicePdfService $pdfService)
@@ -331,108 +347,26 @@ class BookingController extends Controller
         abort_unless($booking->status === 'checked_in', 409, 'يجب تسجيل دخول النزيل أولًا.');
 
         $validated = $request->validate([
+            'days' => ['nullable', 'integer', 'min:1'],
+            'nightly_rate' => ['nullable', 'numeric', 'min:0'],
+            'room_amount' => ['nullable', 'numeric', 'min:0'],
             'service_amount' => ['nullable', 'numeric', 'min:0', 'max:100000000'],
             'service_description' => ['nullable', 'string', 'max:1000'],
             'tax_name' => ['nullable', 'string', 'max:100'],
             'tax_rate' => ['nullable', 'numeric', 'min:0', 'max:100'],
-            'payment_method' => ['nullable', Rule::in(['cash', 'card', 'transfer'])],
+            'payment_method' => ['nullable', Rule::in(['cash', 'card', 'transfer', 'bank'])],
             'transaction_id' => ['nullable', 'string', 'max:255'],
         ]);
 
-        $invoiceId = DB::transaction(function () use ($booking, $validated) {
-            $lockedBooking = Booking::where('hotel_id', $this->hotelId())
-                ->whereKey($booking->id)
-                ->lockForUpdate()
-                ->firstOrFail();
-            abort_unless($lockedBooking->status === 'checked_in', 409, 'تم إنهاء هذا الحجز مسبقًا.');
+        $result = \App\Services\HotelStayCalculatorService::processCheckOut($booking, $validated);
+        $invoice = $result['invoice'];
+        $invoice->loadMissing(['hotel', 'booking.guest', 'room', 'payments']);
 
-            $invoice = Invoice::where('hotel_id', $lockedBooking->hotel_id)
-                ->where('booking_id', $lockedBooking->id)
-                ->lockForUpdate()
-                ->first();
-
-            // في حال كانت الفاتورة مسددة مسبقًا، يتم تسجيل خروج النزيل مباشرة وتفريغ الغرفة دون إطلاق خطأ
-            if ($invoice && $invoice->status === 'paid') {
-                $lockedBooking->update(['status' => 'checked_out']);
-                Room::where('hotel_id', $lockedBooking->hotel_id)
-                    ->whereKey($lockedBooking->room_id)
-                    ->update(['status' => 'cleaning', 'needs_cleaning' => true]);
-
-                return $invoice->id;
-            }
-
-            $serviceAmount = (float) ($validated['service_amount'] ?? 0);
-            $roomAmount = (float) $lockedBooking->total_price;
-            $taxRate = (float) ($validated['tax_rate'] ?? 0);
-            $taxName = $taxRate > 0 ? (trim($validated['tax_name'] ?? '') ?: 'ضريبة') : null;
-            $taxAmount = round(($roomAmount + $serviceAmount) * $taxRate / 100, 2);
-            $total = $roomAmount + $serviceAmount + $taxAmount;
-            $paymentMethod = $validated['payment_method'] ?? 'cash';
-
-            if (! $invoice) {
-                $invoice = Invoice::create([
-                    'hotel_id' => $lockedBooking->hotel_id,
-                    'booking_id' => $lockedBooking->id,
-                    'room_id' => $lockedBooking->room_id,
-                    'amount' => $roomAmount,
-                    'currency' => $lockedBooking->currency ?? 'SYP',
-                    'service_amount' => $serviceAmount,
-                    'service_description' => $validated['service_description'] ?? null,
-                    'tax_name' => $taxName,
-                    'tax_rate' => $taxRate,
-                    'tax' => $taxAmount,
-                    'total' => $total,
-                    'status' => 'paid',
-                ]);
-            } else {
-                $invoice->update([
-                    'amount' => $roomAmount,
-                    'currency' => $invoice->currency ?: ($lockedBooking->currency ?? 'SYP'),
-                    'service_amount' => $serviceAmount,
-                    'service_description' => $validated['service_description'] ?? null,
-                    'tax_name' => $taxName,
-                    'tax_rate' => $taxRate,
-                    'tax' => $taxAmount,
-                    'total' => $total,
-                    'status' => 'paid',
-                ]);
-            }
-
-            if (! $invoice->payments()->where('status', 'success')->exists()) {
-                Payment::create([
-                    'invoice_id' => $invoice->id,
-                    'transaction_id' => $validated['transaction_id'] ?? null,
-                    'payment_method' => $paymentMethod,
-                    'amount' => $total,
-                    'currency' => $invoice->currency ?? 'SYP',
-                    'status' => 'success',
-                    'paid_at' => now(),
-                ]);
-            }
-
-            Account::firstOrCreate(
-                ['invoice_id' => $invoice->id],
-                [
-                    'hotel_id' => $invoice->hotel_id,
-                    'type' => 'income',
-                    'title' => 'تحصيل فاتورة ' . $invoice->invoice_number,
-                    'amount' => $invoice->total,
-                    'currency' => $invoice->currency ?? 'SYP',
-                    'transaction_date' => now()->toDateString(),
-                    'notes' => 'حجز رقم ' . $lockedBooking->id,
-                ]
-            );
-
-            $lockedBooking->update(['status' => 'checked_out']);
-            Room::where('hotel_id', $lockedBooking->hotel_id)
-                ->whereKey($lockedBooking->room_id)
-                ->update(['status' => 'cleaning', 'needs_cleaning' => true]);
-
-            return $invoice->id;
-        });
-
-        $invoice = Invoice::with(['hotel', 'booking.guest', 'room', 'payments'])->findOrFail($invoiceId);
-        $pdfService->store($invoice);
+        try {
+            $pdfService->store($invoice);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning("Failed to store invoice PDF on checkout: " . $e->getMessage());
+        }
 
         // إرسال إشعار تسجيل الخروج والفاتورة الإلكترونية للنزيل
         \App\Services\GuestStayNotificationService::sendCheckOutEmail($booking, $invoice);

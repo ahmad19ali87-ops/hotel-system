@@ -177,8 +177,8 @@
 
         $checkIn = $invoice->booking?->check_in ? \Carbon\Carbon::parse($invoice->booking->check_in) : null;
         $checkOut = $invoice->booking?->check_out ? \Carbon\Carbon::parse($invoice->booking->check_out) : null;
-        $nights = ($checkIn && $checkOut) ? max(1, $checkIn->diffInDays($checkOut)) : 1;
-        $roomPricePerNight = round(((float) $invoice->amount) / $nights, 2);
+        $nights = $invoice->nights ?: (($checkIn && $checkOut) ? max(1, $checkIn->diffInDays($checkOut)) : 1);
+        $roomPricePerNight = $invoice->nightly_rate ?: round(((float) $invoice->amount) / $nights, 2);
 
         $cashier = $invoice->booking?->creator?->name ?? auth()->user()?->name ?? 'موظف الاستقبال';
         $dateStr = $invoice->created_at?->format('Y-m-d H:i') ?? date('Y-m-d H:i');

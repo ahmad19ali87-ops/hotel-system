@@ -5987,8 +5987,66 @@ class CheckoutBookingDialog extends StatefulWidget {
 class _CheckoutBookingDialogState extends State<CheckoutBookingDialog> {
   final _serviceAmountCtrl = TextEditingController(text: '0');
   final _serviceDescCtrl = TextEditingController();
+  late TextEditingController _daysCtrl;
+  late TextEditingController _nightlyRateCtrl;
   String _paymentMethod = 'cash';
   bool _isSubmitting = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final b = AppState.safeMap(widget.booking);
+    final r = AppState.safeMap(widget.room ?? b['room']);
+    final currency = AppState.safeString(b['currency'], 'USD');
+
+    // Calculate actual stay duration according to hotel 12:00 PM cycle
+    final checkInStr = AppState.safeString(b['actual_check_in_at'] ?? b['check_in']);
+    DateTime checkInDT = DateTime.tryParse(checkInStr) ?? DateTime.now();
+    DateTime checkOutDT = DateTime.now();
+
+    DateTime startCycle = (checkInDT.hour < 12)
+        ? DateTime(checkInDT.year, checkInDT.month, checkInDT.day).subtract(const Duration(days: 1))
+        : DateTime(checkInDT.year, checkInDT.month, checkInDT.day);
+    DateTime endCycle = (checkOutDT.hour >= 12 && (checkOutDT.hour > 12 || checkOutDT.minute > 0))
+        ? DateTime(checkOutDT.year, checkOutDT.month, checkOutDT.day).add(const Duration(days: 1))
+        : DateTime(checkOutDT.year, checkOutDT.month, checkOutDT.day);
+    int diff = endCycle.difference(startCycle).inDays;
+    int initialDays = diff > 0 ? diff : 1;
+
+    double initialNightlyRate = 0;
+    if (r['price'] != null || r['price_usd'] != null) {
+      if (currency == 'USD') {
+        initialNightlyRate = AppState.safeDouble(r['price_usd']);
+        if (initialNightlyRate <= 0) {
+          initialNightlyRate = AppState.safeDouble(r['price']) / 15000;
+        }
+      } else {
+        initialNightlyRate = AppState.safeDouble(r['price']);
+      }
+    }
+    if (initialNightlyRate <= 0) {
+      int origDays = 1;
+      DateTime? origIn = DateTime.tryParse(b['check_in'] ?? '');
+      DateTime? origOut = DateTime.tryParse(b['check_out'] ?? '');
+      if (origIn != null && origOut != null) {
+        origDays = origOut.difference(origIn).inDays;
+        if (origDays <= 0) origDays = 1;
+      }
+      initialNightlyRate = AppState.safeDouble(b['total_price']) / origDays;
+    }
+
+    _daysCtrl = TextEditingController(text: initialDays.toString());
+    _nightlyRateCtrl = TextEditingController(text: initialNightlyRate > 0 ? initialNightlyRate.toStringAsFixed(2) : '0');
+  }
+
+  @override
+  void dispose() {
+    _daysCtrl.dispose();
+    _nightlyRateCtrl.dispose();
+    _serviceAmountCtrl.dispose();
+    _serviceDescCtrl.dispose();
+    super.dispose();
+  }
 
   String _formatNumber(dynamic val) {
     if (val == null) return '0.00';
@@ -6007,8 +6065,10 @@ class _CheckoutBookingDialogState extends State<CheckoutBookingDialog> {
       r['room_type'] ?? r['type'] ?? b['room_type'],
       'غرفة فندقية'
     );
-    final basePrice = AppState.safeDouble(b['total_price']);
     final currency = AppState.safeString(b['currency'], 'USD');
+    final days = int.tryParse(_daysCtrl.text.trim()) ?? 1;
+    final nightlyRate = double.tryParse(_nightlyRateCtrl.text.replaceAll(',', '').trim()) ?? 0;
+    final basePrice = days * nightlyRate;
     final serviceAmount = double.tryParse(_serviceAmountCtrl.text.replaceAll(',', '').trim()) ?? 0;
     final grandTotal = basePrice + serviceAmount;
 
@@ -6058,14 +6118,69 @@ class _CheckoutBookingDialogState extends State<CheckoutBookingDialog> {
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Text('فترة الإقامة: ${b['check_in']} ⬅️ ${b['check_out']}', style: const TextStyle(fontSize: 12, color: Color(0xFF64748B))),
+                          Text('فترة الحجز: ${b['check_in']} ⬅️ ${b['check_out']}', style: const TextStyle(fontSize: 12, color: Color(0xFF64748B))),
                           Text('أجرة الإقامة: ${_formatNumber(basePrice)} $currency', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF0F172A))),
                         ],
                       ),
                     ],
                   ),
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 14),
+
+                // 12:00 PM Notice
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFEFF6FF),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: const Color(0xFFBFDBFE)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.access_time_filled, color: Color(0xFF2563EB), size: 18),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'دورة اليوم الفندقي: 12:00 ظهراً - 12:00 ظهراً. تم احتساب $days أيام تلقائياً، ويمكنك تعديل الأيام وسعر الليلة يدوياً.',
+                          style: const TextStyle(fontSize: 11, color: Color(0xFF1E40AF), fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 14),
+
+                // Days & Nightly rate inputs
+                Row(
+                  children: [
+                    Expanded(
+                      flex: 2,
+                      child: TextField(
+                        controller: _daysCtrl,
+                        keyboardType: TextInputType.number,
+                        decoration: InputDecoration(
+                          labelText: 'عدد الأيام المحتسبة',
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                        onChanged: (_) => setState(() {}),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      flex: 3,
+                      child: TextField(
+                        controller: _nightlyRateCtrl,
+                        keyboardType: TextInputType.number,
+                        decoration: InputDecoration(
+                          labelText: 'سعر الليلة ($currency)',
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                        onChanged: (_) => setState(() {}),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
 
                 if (isAlreadyPaid)
                   Container(
@@ -6220,6 +6335,9 @@ class _CheckoutBookingDialogState extends State<CheckoutBookingDialog> {
                           'service_amount': servAmt,
                           'service_description': servDesc,
                           'payment_method': _paymentMethod,
+                          'days': days,
+                          'nightly_rate': nightlyRate,
+                          'room_amount': basePrice,
                         }),
                       ).timeout(const Duration(seconds: 20));
 
@@ -6253,7 +6371,6 @@ class _CheckoutBookingDialogState extends State<CheckoutBookingDialog> {
   }
 }
 
-// ============================================================================
 // 2.3 CREATE & WALK-IN BOOKING DIALOG (تسكين وحجز فوري)
 // ============================================================================
 class CreateBookingDialog extends StatefulWidget {

@@ -10,6 +10,8 @@ class Invoice extends Model
         'hotel_id',
         'booking_id',
         'room_id',
+        'nights',
+        'nightly_rate',
         'amount',
         'service_amount',
         'service_description',

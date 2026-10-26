@@ -7,11 +7,17 @@ use Illuminate\Database\Eloquent\Model;
 class Booking extends Model
 {
     protected $fillable = [
-    'hotel_id', 'room_id', 'guest_id', 'created_by',
-    'guest_name', 'guest_phone',
-    'check_in', 'check_out',
-    'total_price', 'total_price_usd', 'currency', 'status'
-];
+        'hotel_id', 'room_id', 'guest_id', 'created_by',
+        'guest_name', 'guest_phone',
+        'check_in', 'check_out',
+        'actual_check_in_at', 'actual_check_out_at',
+        'total_price', 'total_price_usd', 'currency', 'status'
+    ];
+
+    protected $casts = [
+        'actual_check_in_at' => 'datetime',
+        'actual_check_out_at' => 'datetime',
+    ];
 
 
     public function room()

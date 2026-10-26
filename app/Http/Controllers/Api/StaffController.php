@@ -718,8 +718,7 @@ class StaffController extends Controller
         }
 
         $booking = Booking::where('hotel_id', $user->hotel_id)->findOrFail($id);
-        $booking->update(['status' => 'checked_in']);
-        $booking->room?->update(['status' => 'occupied']);
+        \App\Services\HotelStayCalculatorService::processCheckIn($booking, $request->input('check_in_time'));
 
         NotificationService::sendToHotelStaff(
             $user->hotel_id,
@@ -772,69 +771,12 @@ class StaffController extends Controller
         }
 
         $booking = Booking::where('hotel_id', $user->hotel_id)->with(['room', 'guest'])->findOrFail($id);
-        $booking->update(['status' => 'checked_out']);
-
-        // Set room status to cleaning & needs_cleaning
-        $booking->room?->update([
-            'status' => 'cleaning',
-            'needs_cleaning' => true,
-        ]);
-
-        // Auto issue & pay invoice if not yet issued
-        $invoice = Invoice::where('hotel_id', $user->hotel_id)->where('booking_id', $booking->id)->first();
-        if (! $invoice) {
-            $invoice = Invoice::create([
-                'hotel_id' => $user->hotel_id,
-                'booking_id' => $booking->id,
-                'room_id' => $booking->room_id,
-                'invoice_number' => 'INV-' . strtoupper(uniqid()),
-                'amount' => $booking->total_price,
-                'currency' => $booking->currency ?? 'USD',
-                'service_amount' => $request->input('service_amount', 0),
-                'service_description' => $request->input('service_description', null),
-                'tax' => 0,
-                'total' => (float) $booking->total_price + (float) $request->input('service_amount', 0),
-                'status' => 'paid',
-                'paid_at' => now(),
-            ]);
-
-            // Create income accounting entry
-            Account::create([
-                'hotel_id' => $user->hotel_id,
-                'invoice_id' => $invoice->id,
-                'amount' => $invoice->total,
-                'type' => 'income',
-                'title' => "تحصيل فاتورة مغادرة الحجز رقم #{$booking->id} للنزيل {$booking->guest?->name}",
-                'currency' => $invoice->currency,
-                'notes' => 'إيراد إقامة فندقية (تسجيل خروج)',
-                'transaction_date' => now()->toDateString(),
-            ]);
-        } else {
-            $wasPaid = $invoice->status === 'paid';
-            $serviceAmount = (float) $request->input('service_amount', 0);
-            if ($serviceAmount > 0) {
-                $invoice->service_amount = ((float) $invoice->service_amount) + $serviceAmount;
-                $invoice->total = ((float) $invoice->total) + $serviceAmount;
-                if ($request->filled('service_description')) {
-                    $invoice->service_description = trim(($invoice->service_description ? $invoice->service_description . ' | ' : '') . $request->input('service_description'));
-                }
-            }
-            $invoice->status = 'paid';
-            $invoice->paid_at = now();
-            $invoice->save();
-
-            if (! $wasPaid) {
-                Account::create([
-                    'hotel_id' => $user->hotel_id,
-                    'invoice_id' => $invoice->id,
-                    'amount' => $invoice->total,
-                    'type' => 'income',
-                    'title' => "تحصيل فاتورة مغادرة الحجز رقم #{$booking->id} للنزيل {$booking->guest?->name}",
-                    'currency' => $invoice->currency,
-                    'notes' => 'إيراد إقامة فندقية (تسجيل خروج)',
-                    'transaction_date' => now()->toDateString(),
-                ]);
-            }
+        $result = \App\Services\HotelStayCalculatorService::processCheckOut($booking, $request->all());
+        $invoice = $result['invoice'];
+        try {
+            app(\App\Services\InvoicePdfService::class)->store($invoice);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning("PDF generation failed in checkOutBooking: " . $e->getMessage());
         }
 
         NotificationService::sendToHotelStaff(
